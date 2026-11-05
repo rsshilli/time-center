@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { BrowserWindow } from "electron";
 
 /** The screens the single app window can show. */
-export type Screen = "permissions" | "settings";
+export type Screen = "dashboard" | "permissions" | "settings";
 
 /**
  * Owns the one app window. It is created when needed and destroyed (not hidden) when closed, so the
@@ -36,8 +36,8 @@ export class WindowManager {
    */
   private createWindow(): BrowserWindow {
     const window = new BrowserWindow({
-      width: 720,
-      height: 760,
+      width: 1000,
+      height: 820,
       title: "Time Center",
       show: false,
       webPreferences: {

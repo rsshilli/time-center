@@ -39,6 +39,7 @@ export class TrayController {
     }
     this.tray.setContextMenu(
       Menu.buildFromTemplate([
+        { label: "Today…", click: () => this.deps.windows.show("dashboard") },
         { label: "Settings…", click: () => this.deps.windows.show("settings") },
         { label: "Permissions…", click: () => this.deps.windows.show("permissions") },
         { type: "separator" },

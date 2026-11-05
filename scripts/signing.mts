@@ -102,6 +102,11 @@ function sign(appPath: string): void {
   if (!hash) {
     throw new Error(`The signing keychain holds no "${CERT_NAME}" identity.`);
   }
+  // --deep covers nested bundles only, not loose executables in Resources, so sign our helper first.
+  const helper = join(appPath, "Contents/Resources/bin/active-window");
+  if (existsSync(helper)) {
+    execFileSync("codesign", ["--force", "--sign", hash, "--keychain", KEYCHAIN_PATH, helper], { stdio: "inherit" });
+  }
   // --deep signs the Electron frameworks and helper apps inside the bundle with the same identity.
   execFileSync("codesign", ["--force", "--deep", "--sign", hash, "--keychain", KEYCHAIN_PATH, appPath], {
     stdio: "inherit",

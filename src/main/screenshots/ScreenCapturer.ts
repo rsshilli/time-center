@@ -1,0 +1,188 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { SegmentKind } from "../../shared/ipc";
+import type { ActivityStore } from "../activity/ActivityStore";
+
+/** Take a screenshot only while total CPU use is under this percentage (user's pick). */
+export const CPU_LIMIT_PERCENT = 30;
+
+/** While the CPU is busy, check again this often... */
+export const RETRY_EVERY_MS = 5_000;
+
+/** ...for up to this long after the minute mark, then skip the minute. */
+export const GIVE_UP_AFTER_MS = 30_000;
+
+/** One display's picture, already encoded. */
+export interface DisplayCapture {
+  displayId: string;
+  full: Buffer;
+  thumb: Buffer;
+}
+
+/** What one minute mark did, for tests and logs. */
+export type MinuteResult = "taken" | "skipped-busy" | "skipped-private" | "not-recording";
+
+/** What the capturer needs, injected so tests run without Electron or a real clock. */
+export interface ScreenCapturerDeps {
+  activity: Pick<ActivityStore, "insertScreenshot">;
+  /** The stretch being recorded; null while locked, asleep or between stretches. */
+  currentSegment(): { id: number; kind: SegmentKind } | null;
+  /** Whether macOS allows screen capture; without it shots come out blank. */
+  canCapture(): boolean;
+  /** Total CPU use across all cores, measured over a short window. */
+  sampleCpuPercent(): Promise<number>;
+  /** Pictures of every display, as JPEGs, with the ignored apps' windows left out. */
+  captureDisplays(): Promise<DisplayCapture[]>;
+  /** Folder that holds one sub-folder of screenshots per day. */
+  screenshotsDir: string;
+  now(): number;
+  sleep(ms: number): Promise<void>;
+}
+
+/**
+ * Takes a screenshot of every display once a minute, on the minute mark, but only while the CPU is
+ * quiet. A busy CPU is re-checked every 5 seconds for up to 30 seconds, then the minute is recorded as
+ * skipped. Nothing queues: a missed minute is dropped and the next mark starts fresh. No shot is taken
+ * while away, locked, asleep, or while an ignored app (Edge) is in front, and Edge windows elsewhere on
+ * screen are cut out of the pictures. Files stay on this Mac.
+ */
+export class ScreenCapturer {
+  private timer: NodeJS.Timeout | null = null;
+  private stopped = true;
+
+  /** @param deps The tracker, storage, clock and Electron capture calls. */
+  constructor(private readonly deps: ScreenCapturerDeps) {}
+
+  /** Starts waiting for the next minute mark. */
+  start(): void {
+    this.stopped = false;
+    this.scheduleNextMinute();
+  }
+
+  /** Sets a timer for the next whole minute; each run schedules the following one when it ends. */
+  private scheduleNextMinute(): void {
+    if (this.stopped) {
+      return;
+    }
+    const now = this.deps.now();
+    const nextMinute = Math.floor(now / 60_000) * 60_000 + 60_000;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.runMinute(nextMinute)
+        .catch((error: unknown) => console.error("Time Center: screenshot failed", error))
+        .finally(() => this.scheduleNextMinute());
+    }, nextMinute - now);
+  }
+
+  /**
+   * Handles one minute mark: waits for a quiet CPU, then captures, or records the minute as skipped.
+   * @param minuteStart The minute mark.
+   * @returns What happened.
+   */
+  async runMinute(minuteStart: number): Promise<MinuteResult> {
+    // Timers don't run while the Mac sleeps, so one can fire long after its minute: drop that minute.
+    if (this.deps.now() - minuteStart > GIVE_UP_AFTER_MS) {
+      return "not-recording";
+    }
+    while (true) {
+      if (!this.shouldCapture()) {
+        return "not-recording";
+      }
+      const cpu = await this.deps.sampleCpuPercent();
+      if (cpu < CPU_LIMIT_PERCENT) {
+        return (await this.capture(cpu)) > 0 ? "taken" : "skipped-private";
+      }
+      if (this.deps.now() + RETRY_EVERY_MS - minuteStart > GIVE_UP_AFTER_MS) {
+        this.deps.activity.insertScreenshot({
+          takenAt: minuteStart,
+          status: "skipped-busy",
+          displayId: null,
+          path: null,
+          thumbPath: null,
+          bytes: null,
+          cpuPercent: cpu,
+          segmentId: this.deps.currentSegment()?.id ?? null,
+        });
+        return "skipped-busy";
+      }
+      await this.deps.sleep(RETRY_EVERY_MS);
+    }
+  }
+
+  /**
+   * Says whether a shot may be taken now: recording active time, not away or in Edge, with permission.
+   * @returns True when it may.
+   */
+  private shouldCapture(): boolean {
+    return !this.stopped && this.deps.currentSegment()?.kind === "active" && this.deps.canCapture();
+  }
+
+  /**
+   * Captures every display and stores each picture and its thumbnail under the day's folder. The
+   * pictures are thrown away if the stretch in front changed during the capture (say Edge came to the
+   * front), since the window sample that allowed the shot may then be out of date.
+   * @param cpu The CPU reading that allowed it.
+   * @returns How many displays were saved.
+   */
+  private async capture(cpu: number): Promise<number> {
+    const takenAt = this.deps.now();
+    // Linked to the stretch in front when the shot was taken, read before the slow capture.
+    const segmentId = this.deps.currentSegment()?.id ?? null;
+    const displays = await this.deps.captureDisplays();
+    if (!this.shouldCapture() || this.deps.currentSegment()?.id !== segmentId) {
+      return 0;
+    }
+    const { day, time, zone } = localStamp(takenAt);
+    const dir = join(this.deps.screenshotsDir, day);
+    await mkdir(dir, { recursive: true });
+    for (const display of displays) {
+      // The UTC offset keeps the repeated hour, on the night the clocks go back, from overwriting files.
+      const base = `${time}${zone}-${display.displayId.replace(/[^\w-]/g, "_")}`;
+      const path = join(dir, `${base}.jpg`);
+      const thumbPath = join(dir, `${base}-thumb.jpg`);
+      await writeFile(path, display.full);
+      await writeFile(thumbPath, display.thumb);
+      this.deps.activity.insertScreenshot({
+        takenAt,
+        status: "taken",
+        displayId: display.displayId,
+        path,
+        thumbPath,
+        bytes: display.full.length + display.thumb.length,
+        cpuPercent: cpu,
+        segmentId,
+      });
+    }
+    return displays.length;
+  }
+
+  /** Stops taking screenshots. */
+  stop(): void {
+    this.stopped = true;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+}
+
+/**
+ * Formats a moment as the day folder and file-name time, in local time.
+ * @param ms The moment.
+ * @returns e.g. { day: "2026-11-04", time: "093105", zone: "-0600" }.
+ */
+export function localStamp(ms: number): { day: string; time: string; zone: string } {
+  const date = new Date(ms);
+  /**
+   * Pads a number to two digits.
+   * @param value The number.
+   * @returns e.g. "07".
+   */
+  const pad = (value: number) => String(Math.abs(value)).padStart(2, "0");
+  const offset = -date.getTimezoneOffset();
+  return {
+    day: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    time: `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`,
+    zone: `${offset < 0 ? "-" : "+"}${pad(Math.trunc(offset / 60))}${pad(offset % 60)}`,
+  };
+}

@@ -1,5 +1,9 @@
 import { ipcMain } from "electron";
 import { IPC, type BackupSettingsInput, type BackupStatus, type PermissionKind } from "../shared/ipc";
+import type { ActivityStore } from "./activity/ActivityStore";
+import { assertRules, parseRules } from "./activity/classify";
+import { buildDayReport } from "./activity/dayReport";
+import { IGNORED_APPS_SETTING, assertIgnoredApps, parseIgnoredApps } from "./activity/ignoredApps";
 import type { BackupScheduler } from "./backup/BackupScheduler";
 import type { BackupService } from "./backup/BackupService";
 import type { Permissions } from "./permissions/Permissions";
@@ -9,12 +13,18 @@ import type { Store } from "./store/Store";
 /** The services the renderer's requests are answered from. */
 export interface IpcDependencies {
   store: Store;
+  activity: ActivityStore;
   permissions: Permissions;
   backupService: BackupService;
   scheduler: BackupScheduler;
   backupState: { lastError: string | null };
   onBackupChanged: () => void;
+  /** Restarts the window helper so a new ignored-apps list takes effect. */
+  onIgnoredAppsChanged: () => void;
 }
+
+/** The setting that holds the category rules as JSON. */
+export const RULES_SETTING = "categoryRules";
 
 /** Permission names the renderer may send; anything else is rejected. */
 const PERMISSION_KINDS: readonly PermissionKind[] = ["accessibility", "screen", "microphone", "automation"];
@@ -25,6 +35,22 @@ const PERMISSION_KINDS: readonly PermissionKind[] = ["accessibility", "screen", 
  * @param deps The services to answer from.
  */
 export function registerIpcHandlers(deps: IpcDependencies): void {
+  ipcMain.handle(IPC.getDay, (_event, at: unknown) =>
+    buildDayReport(deps.activity, parseRules(deps.store.getSetting(RULES_SETTING)), assertMoment(at)),
+  );
+  ipcMain.handle(IPC.getRules, () => parseRules(deps.store.getSetting(RULES_SETTING)));
+  ipcMain.handle(IPC.saveRules, (_event, rules: unknown) => {
+    const checked = assertRules(rules);
+    deps.store.setSetting(RULES_SETTING, JSON.stringify(checked));
+    return checked;
+  });
+  ipcMain.handle(IPC.getIgnoredApps, () => parseIgnoredApps(deps.store.getSetting(IGNORED_APPS_SETTING)));
+  ipcMain.handle(IPC.saveIgnoredApps, (_event, apps: unknown) => {
+    const checked = assertIgnoredApps(apps);
+    deps.store.setSetting(IGNORED_APPS_SETTING, JSON.stringify(checked));
+    deps.onIgnoredAppsChanged();
+    return checked;
+  });
   ipcMain.handle(IPC.getPermissions, () => deps.permissions.getAll());
   ipcMain.handle(IPC.requestPermission, (_event, kind: unknown) => deps.permissions.request(assertPermissionKind(kind)));
   ipcMain.handle(IPC.openPermissionSettings, (_event, kind: unknown) =>
@@ -43,6 +69,18 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     return buildBackupStatus(deps);
   });
   ipcMain.handle(IPC.restoreLatestBackup, () => restoreLatestBackup(deps));
+}
+
+/**
+ * Checks that a value from the renderer is a usable moment in time.
+ * @param at The value, milliseconds since 1970.
+ * @returns It, typed.
+ */
+export function assertMoment(at: unknown): number {
+  if (typeof at !== "number" || !Number.isFinite(at) || Number.isNaN(new Date(at).getTime())) {
+    throw new Error(`Not a moment in time: ${String(at)}`);
+  }
+  return at;
 }
 
 /**

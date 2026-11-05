@@ -10,6 +10,10 @@ files:
   # The menu-bar icon: electron-vite's `?asset` imports point at resources/ rather than copying into out/.
   - resources/tray*.png
   - package.json
+# The front-window helper (`npm run native`) must be a real file, not inside app.asar, to be executable.
+extraResources:
+  - from: resources/bin
+    to: bin
 asar: true
 mac:
   category: public.app-category.productivity

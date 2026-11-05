@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { DashboardScreen } from "./DashboardScreen";
 import { PermissionsScreen } from "./PermissionsScreen";
 import { SettingsScreen } from "./SettingsScreen";
 
 /** The screens reachable from the tray, keyed by URL hash. */
-type Route = "permissions" | "settings";
+type Route = "dashboard" | "permissions" | "settings";
 
 /**
  * The app window: a tab bar over whichever screen the tray asked for. The screen lives in the URL hash
@@ -20,8 +21,11 @@ export function App() {
   }, []);
 
   return (
-    <div className="app">
+    <div className={route === "dashboard" ? "app wide" : "app"}>
       <nav className="tabs">
+        <a className={route === "dashboard" ? "active" : ""} href="#/dashboard">
+          Today
+        </a>
         <a className={route === "permissions" ? "active" : ""} href="#/permissions">
           Permissions
         </a>
@@ -29,15 +33,22 @@ export function App() {
           Settings
         </a>
       </nav>
-      <main>{route === "permissions" ? <PermissionsScreen /> : <SettingsScreen />}</main>
+      <main>
+        {route === "dashboard" && <DashboardScreen />}
+        {route === "permissions" && <PermissionsScreen />}
+        {route === "settings" && <SettingsScreen />}
+      </main>
     </div>
   );
 }
 
 /**
  * Reads the screen from the URL hash.
- * @returns The route, defaulting to settings.
+ * @returns The route, defaulting to the dashboard.
  */
 function readRoute(): Route {
-  return window.location.hash === "#/permissions" ? "permissions" : "settings";
+  if (window.location.hash === "#/permissions") {
+    return "permissions";
+  }
+  return window.location.hash === "#/settings" ? "settings" : "dashboard";
 }

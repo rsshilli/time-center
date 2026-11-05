@@ -6,6 +6,11 @@ import { IPC, type TimeCenterApi } from "../shared/ipc";
  * forwarded over IPC. The renderer gets no direct access to Node or Electron.
  */
 const api: TimeCenterApi = {
+  getDay: (at) => ipcRenderer.invoke(IPC.getDay, at),
+  getRules: () => ipcRenderer.invoke(IPC.getRules),
+  saveRules: (rules) => ipcRenderer.invoke(IPC.saveRules, rules),
+  getIgnoredApps: () => ipcRenderer.invoke(IPC.getIgnoredApps),
+  saveIgnoredApps: (apps) => ipcRenderer.invoke(IPC.saveIgnoredApps, apps),
   getPermissions: () => ipcRenderer.invoke(IPC.getPermissions),
   requestPermission: (kind) => ipcRenderer.invoke(IPC.requestPermission, kind),
   openPermissionSettings: (kind) => ipcRenderer.invoke(IPC.openPermissionSettings, kind),

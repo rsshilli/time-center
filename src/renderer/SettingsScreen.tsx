@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { BackupSettingsInput, BackupStatus } from "../shared/ipc";
+import { IgnoredAppsEditor } from "./IgnoredAppsEditor";
+import { RulesEditor } from "./RulesEditor";
 
 /**
  * Settings for the weekly backup to Amazon S3: which bucket, region and `~/.aws` profile to use, an
@@ -117,6 +119,8 @@ export function SettingsScreen() {
         )}
       </dl>
       {message && <p className="message">{message}</p>}
+      <RulesEditor />
+      <IgnoredAppsEditor />
     </section>
   );
 }

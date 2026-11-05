@@ -1,4 +1,13 @@
-import { assertBackupSettingsInput, assertPermissionKind } from "../src/main/ipcHandlers";
+import { assertBackupSettingsInput, assertMoment, assertPermissionKind } from "../src/main/ipcHandlers";
+
+describe("assertMoment", () => {
+  it("should accept a time in milliseconds and reject anything else from the renderer", () => {
+    expect(assertMoment(1_762_000_000_000)).toBe(1_762_000_000_000);
+    expect(() => assertMoment("today")).toThrow(/Not a moment/);
+    expect(() => assertMoment(Number.NaN)).toThrow(/Not a moment/);
+    expect(() => assertMoment(1e20)).toThrow(/Not a moment/);
+  });
+});
 
 describe("assertPermissionKind", () => {
   it("should accept the four permission names and reject anything else from the renderer", () => {
