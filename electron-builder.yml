@@ -7,6 +7,8 @@ files:
   - out/main/**
   - out/preload/**
   - out/renderer/**
+  # The menu-bar icon: electron-vite's `?asset` imports point at resources/ rather than copying into out/.
+  - resources/tray*.png
   - package.json
 asar: true
 mac:

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="orange" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FF9B3D"/>
+      <stop offset="1" stop-color="#F26A10"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#orange)"/>
+  <g fill="#FFFFFF">
+    <ellipse cx="23.5" cy="18" rx="6" ry="13.5" transform="rotate(-14 23.5 18)"/>
+    <ellipse cx="40.5" cy="18" rx="6" ry="13.5" transform="rotate(14 40.5 18)"/>
+  </g>
+  <g fill="#FFB98A">
+    <ellipse cx="23.5" cy="18.5" rx="2.6" ry="9" transform="rotate(-14 23.5 18)"/>
+    <ellipse cx="40.5" cy="18.5" rx="2.6" ry="9" transform="rotate(14 40.5 18)"/>
+  </g>
+  <circle cx="32" cy="40" r="17.5" fill="#FFFFFF"/>
+  <g fill="#8A3A0A">
+    <rect x="31" y="25" width="2" height="4" rx="1"/>
+    <rect x="31" y="51" width="2" height="4" rx="1"/>
+    <rect x="17" y="39" width="4" height="2" rx="1"/>
+    <rect x="43" y="39" width="4" height="2" rx="1"/>
+  </g>
+  <g stroke="#8A3A0A" stroke-linecap="round">
+    <line x1="32" y1="40" x2="25.5" y2="36.2" stroke-width="3"/>
+    <line x1="32" y1="40" x2="41.5" y2="34.5" stroke-width="2.4"/>
+  </g>
+  <circle cx="32" cy="40" r="2.4" fill="#8A3A0A"/>
+</svg>

@@ -75,7 +75,7 @@ export function PermissionsScreen() {
       <h1>Permissions</h1>
       <p className="lead">
         macOS asks once for each of these. {allowedCount} of {statuses.length} allowed. Screen Recording takes
-        effect after Time Center restarts: quit it from the ◷ menu-bar icon, then open it again.
+        effect after Time Center restarts: quit it from the orange rabbit icon in the menu bar, then open it again.
       </p>
       <ul className="permissions">
         {statuses.map((status) => (

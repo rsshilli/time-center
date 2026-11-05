@@ -1,4 +1,7 @@
-import { Menu, Tray, app, nativeImage } from "electron";
+import { readFileSync } from "node:fs";
+import { Menu, Tray, app, nativeImage, type NativeImage } from "electron";
+import trayIconPath from "../../resources/tray.png?asset";
+import trayIcon2xPath from "../../resources/tray@2x.png?asset";
 import type { BackupService } from "./backup/BackupService";
 import type { WindowManager } from "./WindowManager";
 
@@ -8,9 +11,6 @@ export interface TrayDependencies {
   windows: WindowManager;
   onBackupNow: () => Promise<void>;
 }
-
-/** The text shown in the menu bar. A symbol for now; later phases add a red dot while recording. */
-const TRAY_TITLE = "◷";
 
 /**
  * The menu-bar icon and its menu: open the app's screens, see when the last backup ran, back up now,
@@ -24,8 +24,7 @@ export class TrayController {
 
   /** Puts the icon in the menu bar. */
   create(): void {
-    this.tray = new Tray(nativeImage.createEmpty());
-    this.tray.setTitle(TRAY_TITLE);
+    this.tray = new Tray(loadTrayIcon());
     this.tray.setToolTip("Time Center");
     this.refresh(null);
   }
@@ -56,6 +55,18 @@ export class TrayController {
       ]),
     );
   }
+}
+
+/**
+ * Loads the rabbit-with-a-clock icon (drawn in resources/icon.svg, rendered by `npm run icons`) with its
+ * Retina copy, so it stays sharp on every screen. It is a full-colour image, not a macOS "template"
+ * image, so the orange background shows in both light and dark menu bars.
+ * @returns The 18-point icon with a 2x representation.
+ */
+function loadTrayIcon(): NativeImage {
+  const icon = nativeImage.createFromPath(trayIconPath);
+  icon.addRepresentation({ scaleFactor: 2, buffer: readFileSync(trayIcon2xPath) });
+  return icon;
 }
 
 /**
