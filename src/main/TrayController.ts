@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
-import { Menu, Tray, app, nativeImage, type NativeImage } from "electron";
+import { Menu, Tray, app, nativeImage, type MenuItemConstructorOptions, type NativeImage } from "electron";
 import trayIconPath from "../../resources/tray.png?asset";
 import trayIcon2xPath from "../../resources/tray@2x.png?asset";
+import type { MeetingInfo } from "../shared/ipc";
 import type { BackupService } from "./backup/BackupService";
 import type { WindowManager } from "./WindowManager";
 
@@ -10,14 +11,26 @@ export interface TrayDependencies {
   backupService: BackupService;
   windows: WindowManager;
   onBackupNow: () => Promise<void>;
+  /** Whether Google Calendar is signed in, and the coming meetings. */
+  meetings: () => { signedIn: boolean; list: MeetingInfo[] };
+  onSkipMeeting: (eventId: string) => void;
+  onJoinMeeting: (eventId: string) => void;
+}
+
+/** One meeting line in the menu, before it becomes an Electron menu item. */
+export interface MeetingMenuItem {
+  label: string;
+  action: { kind: "skip" | "join"; eventId: string } | { kind: "settings" } | null;
 }
 
 /**
- * The menu-bar icon and its menu: open the app's screens, see when the last backup ran, back up now,
- * and quit. The menu is rebuilt whenever the backup state changes.
+ * The menu-bar icon and its menu: the next meeting (skip its join, or join now), open the app's screens,
+ * see when the last backup ran, back up now, and quit. The menu is rebuilt whenever the backup state or
+ * a meeting changes.
  */
 export class TrayController {
   private tray: Tray | null = null;
+  private lastBackupError: string | null = null;
 
   /** @param deps The services the menu acts on. */
   constructor(private readonly deps: TrayDependencies) {}
@@ -30,15 +43,27 @@ export class TrayController {
   }
 
   /**
-   * Rebuilds the menu with the current backup line.
-   * @param lastError The most recent backup error, or null when the last attempt worked.
+   * Rebuilds the menu with the current meeting and backup lines.
+   * @param lastError The most recent backup error, or null when the last attempt worked; left out when only
+   *   the meetings changed.
    */
-  refresh(lastError: string | null): void {
+  refresh(lastError: string | null = this.lastBackupError): void {
+    this.lastBackupError = lastError;
     if (!this.tray) {
       return;
     }
+    const { signedIn, list } = this.deps.meetings();
+    const meetingItems = meetingMenuItems(signedIn, list, Date.now()).map(
+      (item): MenuItemConstructorOptions => ({
+        label: item.label,
+        enabled: item.action !== null,
+        click: () => this.runMeetingAction(item.action),
+      }),
+    );
     this.tray.setContextMenu(
       Menu.buildFromTemplate([
+        ...meetingItems,
+        { type: "separator" },
         { label: "Today…", click: () => this.deps.windows.show("dashboard") },
         { label: "Settings…", click: () => this.deps.windows.show("settings") },
         { label: "Permissions…", click: () => this.deps.windows.show("permissions") },
@@ -56,6 +81,69 @@ export class TrayController {
       ]),
     );
   }
+
+  /**
+   * Does what a meeting line in the menu was clicked for.
+   * @param action The line's action.
+   */
+  private runMeetingAction(action: MeetingMenuItem["action"]): void {
+    if (action?.kind === "skip") {
+      this.deps.onSkipMeeting(action.eventId);
+    } else if (action?.kind === "join") {
+      this.deps.onJoinMeeting(action.eventId);
+    } else if (action?.kind === "settings") {
+      this.deps.windows.show("settings");
+    }
+  }
+}
+
+/**
+ * Writes the meeting lines at the top of the menu: the next meeting that hasn't ended, and what can be
+ * done about it — skip the join during its 30-second notice, or join it now.
+ * @param signedIn Whether Google Calendar is signed in.
+ * @param meetings The coming meetings, soonest first.
+ * @param now The current time.
+ * @returns The lines.
+ */
+export function meetingMenuItems(signedIn: boolean, meetings: MeetingInfo[], now: number): MeetingMenuItem[] {
+  if (!signedIn) {
+    return [{ label: "Meetings: sign in to Google in Settings…", action: { kind: "settings" } }];
+  }
+  // The one about to be joined first, then the next to start, then one in progress.
+  const live = meetings.filter((meeting) => meeting.end > now && meeting.state !== "declined");
+  const next =
+    live.find((meeting) => meeting.state === "joining") ??
+    live.find((meeting) => meeting.start > now) ??
+    live[0];
+  if (!next) {
+    return [{ label: "No meetings in the next day", action: null }];
+  }
+  const when = new Date(next.start).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const items: MeetingMenuItem[] = [{ label: `Next: ${next.title} at ${when}${stateNote(next)}`, action: null }];
+  if (next.state === "joining" || next.state === "will-join") {
+    items.push({ label: `Skip joining ${next.title}`, action: { kind: "skip", eventId: next.eventId } });
+  }
+  if (next.provider) {
+    items.push({ label: `Join ${next.title} now`, action: { kind: "join", eventId: next.eventId } });
+  }
+  return items;
+}
+
+/**
+ * Says in a few words what will happen with a meeting.
+ * @param meeting The meeting.
+ * @returns e.g. " (joins automatically)", or "" when there's nothing to add.
+ */
+function stateNote(meeting: MeetingInfo): string {
+  const notes: Partial<Record<MeetingInfo["state"], string>> = {
+    "will-join": " (joins automatically)",
+    joining: " (joining in a moment)",
+    joined: " (joined)",
+    skipped: " (skipped)",
+    failed: " (couldn't join)",
+    "no-link": " (no meeting link)",
+  };
+  return notes[meeting.state] ?? "";
 }
 
 /**

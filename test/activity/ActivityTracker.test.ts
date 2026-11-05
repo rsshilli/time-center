@@ -177,7 +177,12 @@ describe("parseSample", () => {
       title: "PR",
       url: "https://x",
       ignored: false,
+      onCall: false,
     });
+  });
+
+  it("should read whether a call is going", () => {
+    expect(parseSample('{"app":"zoom.us","ignored":false,"onCall":true}')?.onCall).toBe(true);
   });
 
   it("should turn missing fields into null", () => {
@@ -187,6 +192,7 @@ describe("parseSample", () => {
       title: null,
       url: null,
       ignored: true,
+      onCall: false,
     });
   });
 

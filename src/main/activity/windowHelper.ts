@@ -66,6 +66,7 @@ export function parseSample(line: string): WindowSample | null {
       title: stringOrNull(value.title),
       url: stringOrNull(value.url),
       ignored: value.ignored === true,
+      onCall: value.onCall === true,
     };
   } catch {
     return null;

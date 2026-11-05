@@ -74,6 +74,26 @@ describe("SegmentRecorder", () => {
     expect(away).toMatchObject({ kind: "idle", startedAt: T0 + 3000, endedAt: T0 + IDLE_AFTER_MS + 3000 });
   });
 
+  it("should not count time on a call as away, however long without input", () => {
+    // 9:47 to 10:00 on a Zoom call, talking and listening, never touching the keyboard.
+    recorder.record(sample(), T0, 0);
+    for (let at = T0 + 3000; at <= T0 + 13 * 60_000; at += 3000) {
+      recorder.record(sample({ app: "zoom.us", bundleId: "us.zoom.xos", title: "Zoom Meeting", onCall: true }), at, at - T0);
+    }
+    expect(all().map((segment) => segment.kind)).toEqual(["active", "active"]);
+  });
+
+  it("should count away time from the end of the call, not from the last input", () => {
+    recorder.record(sample(), T0, 0);
+    const callEnd = T0 + 10 * 60_000;
+    for (let at = T0 + 3000; at <= callEnd + IDLE_AFTER_MS + 3000; at += 3000) {
+      recorder.record(sample({ onCall: at <= callEnd }), at, at - T0);
+    }
+    const away = all().filter((segment) => segment.kind === "idle");
+    expect(away).toHaveLength(1);
+    expect(away[0].startedAt).toBe(callEnd);
+  });
+
   it("should extend the away stretch while still away and end it on return", () => {
     recorder.record(sample(), T0, IDLE_AFTER_MS);
     recorder.record(sample(), T0 + 3000, IDLE_AFTER_MS + 3000);

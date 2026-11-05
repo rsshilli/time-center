@@ -10,6 +10,8 @@ export interface WindowSample {
   url: string | null;
   /** True for an ignored app (Edge): only its name was read, and none of it is stored. */
   ignored: boolean;
+  /** True while an app (Zoom, Chrome for Meet, Teams…) is using the microphone, i.e. you're on a call. */
+  onCall?: boolean;
 }
 
 /** Counted as away after this long without keyboard or mouse input (user's pick: 5 minutes). */
@@ -33,10 +35,13 @@ interface OpenSegment {
 /**
  * Turns the helper's samples into stretches of time. A sample with the same window as the open stretch
  * extends it; a different window closes it and opens a new one. After five minutes without input the
- * time since the last input is moved into an "away" stretch. Lock and sleep close the open stretch.
+ * time since the last input is moved into an "away" stretch — except on a call: listening and talking
+ * aren't typing, so time with a call going never counts as away. Lock and sleep close the open stretch.
  */
 export class SegmentRecorder {
   private open: OpenSegment | null = null;
+  /** When a sample last said a call was going; away time can't start before it. */
+  private lastCallAt = Number.NEGATIVE_INFINITY;
   /** The end of the last stretch written, including by an earlier run of the app. Nothing starts before it. */
   private floor: number;
 
@@ -52,8 +57,13 @@ export class SegmentRecorder {
    * @param idleMs How long since the last keyboard or mouse input.
    */
   record(sample: WindowSample, at: number, idleMs: number): void {
-    if (idleMs >= IDLE_AFTER_MS) {
-      this.recordIdle(at, idleMs);
+    if (sample.onCall) {
+      this.lastCallAt = at;
+    }
+    // Away is counted from the later of the last input and the end of the last call.
+    const awayMs = Math.min(idleMs, at - this.lastCallAt);
+    if (awayMs >= IDLE_AFTER_MS) {
+      this.recordIdle(at, awayMs);
       return;
     }
     const fields = SegmentRecorder.describe(sample);

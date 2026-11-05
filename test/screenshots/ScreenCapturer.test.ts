@@ -89,6 +89,12 @@ describe("ScreenCapturer", () => {
     expect(rows()[0].cpuPercent).toBe(20);
   });
 
+  it("should treat CPU use under 50% as quiet enough", async () => {
+    const capturer = build([55, 45]);
+    expect(await startedRun(capturer)).toBe("taken");
+    expect(rows()[0].cpuPercent).toBe(45);
+  });
+
   it("should skip the mark when the CPU stays busy for 15 seconds", async () => {
     const readings: number[] = [];
     const capturer = build([], {

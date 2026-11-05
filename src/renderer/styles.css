@@ -262,7 +262,7 @@ button:disabled {
   color: var(--muted);
 }
 
-.timeline-zoom button.link {
+button.link {
   padding: 0;
   border: none;
   background: none;
@@ -470,6 +470,51 @@ button.shot img {
   background: var(--accent);
 }
 
+button.link.total-name {
+  text-align: left;
+}
+
+/* Uncategorized time, opened from the Categories card */
+
+.uncategorized {
+  margin-top: 10px;
+}
+
+.uncategorized-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.uncategorized-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.uncategorized-what {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  margin-bottom: 6px;
+}
+
+.uncategorized-what strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uncategorized-examples {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Category rules */
 
 .rules {
@@ -532,4 +577,67 @@ button.shot img {
 
 .ignored-app button {
   padding: 4px 8px;
+}
+
+.calendar-settings .actions {
+  align-items: center;
+  margin-top: 14px;
+}
+
+.calendar-settings h2 {
+  font-size: 15px;
+  margin: 22px 0 4px;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.meetings {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.meetings td {
+  padding: 7px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.meetings tr:first-child td {
+  border-top: none;
+}
+
+.meeting-time {
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.meeting-state {
+  white-space: nowrap;
+}
+
+.meeting-state.will-join,
+.meeting-state.joined {
+  color: var(--ok);
+}
+
+.meeting-state.failed {
+  color: var(--bad);
+}
+
+.meeting-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.meeting-actions button {
+  padding: 3px 10px;
 }

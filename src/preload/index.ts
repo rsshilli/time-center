@@ -18,6 +18,14 @@ const api: TimeCenterApi = {
   saveBackupSettings: (input) => ipcRenderer.invoke(IPC.saveBackupSettings, input),
   runBackupNow: () => ipcRenderer.invoke(IPC.runBackupNow),
   restoreLatestBackup: () => ipcRenderer.invoke(IPC.restoreLatestBackup),
+  getCalendarStatus: () => ipcRenderer.invoke(IPC.getCalendarStatus),
+  chooseGoogleClient: () => ipcRenderer.invoke(IPC.chooseGoogleClient),
+  signInToGoogle: () => ipcRenderer.invoke(IPC.signInToGoogle),
+  signOutOfGoogle: () => ipcRenderer.invoke(IPC.signOutOfGoogle),
+  setAutoJoin: (on) => ipcRenderer.invoke(IPC.setAutoJoin, on),
+  skipMeeting: (eventId) => ipcRenderer.invoke(IPC.skipMeeting, eventId),
+  joinMeetingNow: (eventId) => ipcRenderer.invoke(IPC.joinMeetingNow, eventId),
+  showExtensionFolder: () => ipcRenderer.invoke(IPC.showExtensionFolder),
 };
 
 contextBridge.exposeInMainWorld("timeCenter", api);

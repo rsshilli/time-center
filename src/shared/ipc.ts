@@ -95,6 +95,53 @@ export interface DayReport {
   byDomain: Total[];
 }
 
+/** The meeting services the app can join. */
+export type MeetingProvider = "meet" | "zoom" | "teams";
+
+/**
+ * Where one meeting stands. will-join: it'll be joined at its join time. joining: the 30-second notice is
+ * up. joined / skipped / failed: decided. missed: its join time passed while the Mac slept or the app was
+ * closed. no-link, declined: never joined. auto-join-off: the setting is off.
+ */
+export type MeetingState =
+  | "will-join"
+  | "joining"
+  | "joined"
+  | "skipped"
+  | "failed"
+  | "missed"
+  | "no-link"
+  | "declined"
+  | "auto-join-off";
+
+/** One meeting in the list on the Settings screen and in the tray. Times are milliseconds since 1970. */
+export interface MeetingInfo {
+  eventId: string;
+  title: string;
+  start: number;
+  end: number;
+  provider: MeetingProvider | null;
+  state: MeetingState;
+  /** When it will be (or was) joined; null when it won't be. */
+  joinAt: number | null;
+}
+
+/** What the Settings screen shows about Google Calendar and auto-join. */
+export interface CalendarStatus {
+  /** Whether a Google OAuth client (credentials.json) has been chosen. */
+  hasClient: boolean;
+  signedIn: boolean;
+  /** The calendar's Google account, once known. */
+  account: string | null;
+  autoJoin: boolean;
+  lastSyncAt: number | null;
+  lastError: string | null;
+  /** The folder to load into Chrome as the companion extension. */
+  extensionPath: string;
+  /** Today's remaining meetings and the next day's, soonest first. */
+  meetings: MeetingInfo[];
+}
+
 /** The custom URL scheme the dashboard loads screenshots from. */
 export const SCREENSHOT_SCHEME = "time-center-shot";
 
@@ -123,6 +170,14 @@ export const IPC = {
   saveBackupSettings: "backup:save-settings",
   runBackupNow: "backup:run-now",
   restoreLatestBackup: "backup:restore-latest",
+  getCalendarStatus: "calendar:status",
+  chooseGoogleClient: "calendar:choose-client",
+  signInToGoogle: "calendar:sign-in",
+  signOutOfGoogle: "calendar:sign-out",
+  setAutoJoin: "calendar:set-auto-join",
+  skipMeeting: "calendar:skip",
+  joinMeetingNow: "calendar:join-now",
+  showExtensionFolder: "calendar:show-extension",
 } as const;
 
 /** The API the preload script exposes to the renderer as `window.timeCenter`. */
@@ -151,4 +206,20 @@ export interface TimeCenterApi {
   runBackupNow(): Promise<BackupStatus>;
   /** Asks, then replaces this Mac's data with the newest backup and restarts the app. */
   restoreLatestBackup(): Promise<RestoreResult>;
+  /** Google sign-in, the auto-join setting and the coming meetings. */
+  getCalendarStatus(): Promise<CalendarStatus>;
+  /** Asks for a Google OAuth client file (credentials.json) and keeps it encrypted. */
+  chooseGoogleClient(): Promise<CalendarStatus>;
+  /** Opens Google's sign-in page in the browser and resolves once you've allowed calendar access. */
+  signInToGoogle(): Promise<CalendarStatus>;
+  /** Forgets the Google sign-in and stops joining meetings. */
+  signOutOfGoogle(): Promise<CalendarStatus>;
+  /** Turns automatic joining on or off. */
+  setAutoJoin(on: boolean): Promise<CalendarStatus>;
+  /** Won't join this occurrence of the meeting. */
+  skipMeeting(eventId: string): Promise<CalendarStatus>;
+  /** Joins the meeting straight away. */
+  joinMeetingNow(eventId: string): Promise<CalendarStatus>;
+  /** Shows the Chrome extension's folder in Finder. */
+  showExtensionFolder(): Promise<void>;
 }

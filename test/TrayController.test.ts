@@ -1,5 +1,6 @@
 import type { BackupService } from "../src/main/backup/BackupService";
-import { describeBackup } from "../src/main/TrayController";
+import type { MeetingInfo } from "../src/shared/ipc";
+import { describeBackup, meetingMenuItems } from "../src/main/TrayController";
 
 describe("describeBackup", () => {
   it("should say backup is not set up when no bucket is configured", () => {
@@ -33,3 +34,53 @@ function fakeService(configured: boolean, lastSuccessAt: string | null): BackupS
     getLastSuccessAt: () => lastSuccessAt,
   } as unknown as BackupService;
 }
+
+describe("meetingMenuItems", () => {
+  const now = Date.parse("2026-11-05T14:00:00Z");
+
+  /**
+   * A meeting starting an hour from now.
+   * @param state Where it stands.
+   * @param extra Anything else to change.
+   * @returns The meeting.
+   */
+  const meeting = (state: MeetingInfo["state"], extra: Partial<MeetingInfo> = {}): MeetingInfo => ({
+    eventId: "e1",
+    title: "Standup",
+    start: now + 3_600_000,
+    end: now + 5_400_000,
+    provider: "meet",
+    state,
+    joinAt: null,
+    ...extra,
+  });
+
+  it("should point to Settings before Google is signed in", () => {
+    expect(meetingMenuItems(false, [], now)).toEqual([
+      { label: "Meetings: sign in to Google in Settings…", action: { kind: "settings" } },
+    ]);
+  });
+
+  it("should offer to skip or join the next meeting", () => {
+    const items = meetingMenuItems(true, [meeting("will-join")], now);
+    expect(items[0].label).toMatch(/^Next: Standup at .+ \(joins automatically\)$/);
+    expect(items.slice(1)).toEqual([
+      { label: "Skip joining Standup", action: { kind: "skip", eventId: "e1" } },
+      { label: "Join Standup now", action: { kind: "join", eventId: "e1" } },
+    ]);
+  });
+
+  it("should pass over declined and finished meetings", () => {
+    const items = meetingMenuItems(
+      true,
+      [meeting("joined", { end: now - 1 }), meeting("declined", { eventId: "e2" }), meeting("no-link", { eventId: "e3", provider: null })],
+      now,
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].label).toMatch(/\(no meeting link\)$/);
+  });
+
+  it("should say when nothing is coming up", () => {
+    expect(meetingMenuItems(true, [], now)).toEqual([{ label: "No meetings in the next day", action: null }]);
+  });
+});

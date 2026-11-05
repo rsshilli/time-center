@@ -4,7 +4,7 @@ import type { SegmentKind } from "../../shared/ipc";
 import type { ActivityStore } from "../activity/ActivityStore";
 
 /** Take a screenshot only while total CPU use is under this percentage (user's pick). */
-export const CPU_LIMIT_PERCENT = 30;
+export const CPU_LIMIT_PERCENT = 50;
 
 /** How often a screenshot is taken: on every half-minute mark (user's pick). */
 export const SHOT_EVERY_MS = 30_000;

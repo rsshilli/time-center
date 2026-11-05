@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { CategoryRule, RuleField } from "../shared/ipc";
 
 /** The fields a rule can look at, as the user reads them. */
-const FIELD_LABELS: Record<RuleField, string> = {
+export const FIELD_LABELS: Record<RuleField, string> = {
   app: "App name contains",
   domain: "Website is",
   url: "Web address contains",

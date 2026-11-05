@@ -1,6 +1,7 @@
 // Time Center's front-window reader. One long-running process, started by the app, that prints one
 // JSON line every few seconds: the front app, its focused window's title and, for Chrome only, the
-// active tab's address. Apps on the ignore list (Edge) are reported by name only: their windows are
+// active tab's address, and whether a call is going (some app other than Krisp is using the microphone).
+// Apps on the ignore list (Edge) are reported by name only: their windows are
 // never read and they are never sent an Apple event.
 //
 // An ignore entry is a bundle id, which also covers ids under it ("com.microsoft.edgemac" covers Edge
@@ -15,6 +16,7 @@
 
 import AppKit
 import ApplicationServices
+import CoreAudio
 import Foundation
 import ImageIO
 import ScreenCaptureKit
@@ -27,6 +29,7 @@ struct Sample: Encodable {
     let title: String?
     let url: String?
     let ignored: Bool
+    let onCall: Bool
 }
 
 /// Chrome's bundle ids (stable, beta, dev, canary) all start with this.
@@ -42,6 +45,7 @@ func isChromeBrowser(_ bundleId: String) -> Bool {
 final class Reporter {
     private let ignored: Set<String>
     private let encoder = JSONEncoder()
+    private let calls = CallDetector()
     /// The Chrome tab address is reused while the window title stays the same, since a tab switch or
     /// navigation usually changes the title. Saves an Apple event most ticks while Chrome is in front.
     private var lastUrlKey: String?
@@ -67,11 +71,11 @@ final class Reporter {
     /// Works out the current sample.
     private func read() -> Sample {
         guard let app = NSWorkspace.shared.frontmostApplication else {
-            return Sample(app: nil, bundleId: nil, title: nil, url: nil, ignored: false)
+            return Sample(app: nil, bundleId: nil, title: nil, url: nil, ignored: false, onCall: calls.isOnCall())
         }
         let bundleId = app.bundleIdentifier
         if isIgnored(app, ignored) {
-            return Sample(app: app.localizedName, bundleId: bundleId, title: nil, url: nil, ignored: true)
+            return Sample(app: app.localizedName, bundleId: bundleId, title: nil, url: nil, ignored: true, onCall: calls.isOnCall())
         }
         let title = focusedWindowTitle(pid: app.processIdentifier) ?? frontWindowName(pid: app.processIdentifier)
         var url: String? = nil
@@ -81,7 +85,7 @@ final class Reporter {
             // Coming back to Chrome later must ask again, even if the title happens to match.
             lastUrlKey = nil
         }
-        return Sample(app: app.localizedName, bundleId: bundleId, title: title, url: url, ignored: false)
+        return Sample(app: app.localizedName, bundleId: bundleId, title: title, url: url, ignored: false, onCall: calls.isOnCall())
     }
 
     /// The focused window's title via Accessibility. Nil without the Accessibility permission.
@@ -142,6 +146,52 @@ final class Reporter {
         lastUrl = result?.stringValue
         return lastUrl
     }
+}
+
+/// Apps that hold the microphone open without a call: Krisp's noise filter runs all the time (seen
+/// 2026-11-05: `ai.krisp.krispMac` capturing input with no call going), and Time Center itself records.
+let notACall = ["ai.krisp", "org.shillington.timecenter"]
+
+/// Works out whether a call is going: some app other than those above is capturing microphone input
+/// (Core Audio's per-process input state, macOS 14+, needs no permission). Browser calls count too:
+/// Chrome's audio helper has no bundle id of its own, and was seen capturing during a real Meet call.
+final class CallDetector {
+    /// Says whether a call is going right now.
+    func isOnCall() -> Bool {
+        return capturingProcesses().contains { pid in
+            let bundleId = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
+            return pid != getpid() && !notACall.contains { bundleId == $0 || bundleId.hasPrefix($0 + ".") }
+        }
+    }
+}
+
+/// Lists the processes capturing microphone input, by pid.
+func capturingProcesses() -> [pid_t] {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyProcessObjectList,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    let system = AudioObjectID(kAudioObjectSystemObject)
+    guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else {
+        return []
+    }
+    var processes = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+    guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &processes) == noErr else {
+        return []
+    }
+    return processes
+        .filter { audioProperty($0, kAudioProcessPropertyIsRunningInput, UInt32(0)) != 0 }
+        .map { audioProperty($0, kAudioProcessPropertyPID, pid_t(0)) }
+}
+
+/// Reads one fixed-size Core Audio property of an audio object, or the fallback when it can't.
+func audioProperty<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ fallback: T) -> T {
+    var address = AudioObjectPropertyAddress(
+        mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var value = fallback
+    var size = UInt32(MemoryLayout<T>.size)
+    return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr ? value : fallback
 }
 
 /// Says whether an app is on the ignore list.

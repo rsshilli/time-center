@@ -14,5 +14,5 @@
     "resolveJsonModule": true,
     "types": ["node", "vitest/globals", "vite/client"]
   },
-  "include": ["src", "test", "spike", "scripts", "electron.vite.config.mts", "vitest.config.mts"]
+  "include": ["src", "test", "extension", "spike", "scripts", "electron.vite.config.mts", "vitest.config.mts"]
 }

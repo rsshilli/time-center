@@ -51,4 +51,38 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX screenshots_taken_at ON screenshots (taken_at);
   `,
+  `
+  -- Meetings on the main Google calendar, refreshed every few minutes for the hours ahead. One row per
+  -- occurrence: Google gives each occurrence of a repeating meeting its own id.
+  CREATE TABLE calendar_events (
+    event_id   TEXT PRIMARY KEY,
+    title      TEXT NOT NULL,
+    starts_at  TEXT NOT NULL,
+    ends_at    TEXT NOT NULL,
+    -- Your answer to the invitation: accepted, tentative, needsAction or declined.
+    response   TEXT NOT NULL,
+    -- meet, zoom or teams; null when the event has no meeting link.
+    provider   TEXT,
+    join_url   TEXT,
+    synced_at  TEXT NOT NULL
+  );
+  CREATE INDEX calendar_events_starts_at ON calendar_events (starts_at);
+
+  -- What happened at a meeting's join time. Keyed by the start too, so a moved meeting is decided afresh.
+  CREATE TABLE meeting_joins (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id   TEXT NOT NULL,
+    starts_at  TEXT NOT NULL,
+    status     TEXT NOT NULL CHECK (status IN ('joined', 'skipped', 'failed')),
+    decided_at TEXT NOT NULL,
+    error      TEXT
+  );
+  CREATE UNIQUE INDEX meeting_joins_event ON meeting_joins (event_id, starts_at);
+  `,
+  `
+  -- The link each decision was about, so a meeting that moves (or gets a new id) after you joined it
+  -- isn't opened a second time.
+  ALTER TABLE meeting_joins ADD COLUMN join_url TEXT;
+  CREATE INDEX meeting_joins_url ON meeting_joins (join_url, decided_at);
+  `,
 ];

@@ -14,6 +14,12 @@ files:
 extraResources:
   - from: resources/bin
     to: bin
+  # The Chrome companion extension, copied to a fixed folder at launch for Chrome's "Load unpacked".
+  - from: extension
+    to: extension
+    filter:
+      - manifest.json
+      - build/**
 asar: true
 mac:
   category: public.app-category.productivity

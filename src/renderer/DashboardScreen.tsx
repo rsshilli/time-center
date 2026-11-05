@@ -3,6 +3,8 @@ import { screenshotUrl, type DayReport, type ScreenshotInfo, type TimelineItem, 
 import { colourFor, formatClock, formatDay, formatDuration } from "./format";
 import { MINUTE, SHIFT_STEP, stepMoment, stepToChange } from "./timelineStep";
 import { keepInView, panRange, tickMoments, zoomRange, type TimeRange } from "./timelineZoom";
+import { UNCATEGORIZED } from "./uncategorized";
+import { UncategorizedPanel } from "./UncategorizedPanel";
 
 /** While showing today, the dashboard re-reads the day this often. */
 const REFRESH_MS = 30_000;
@@ -31,6 +33,8 @@ export function DashboardScreen() {
   /** The zoomed-in stretch of the timeline, or null for the whole day. */
   const [zoom, setZoom] = useState<TimeRange | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Whether the list of uncategorized time, opened from the Categories card, is showing. */
+  const [showUncategorized, setShowUncategorized] = useState(false);
   /** Counts requests, so a slow answer for a day you already left can't replace a newer one. */
   const latestRequest = useRef(0);
   const today = startOfDay(Date.now());
@@ -162,11 +166,28 @@ export function DashboardScreen() {
           <Timeline report={report} selected={selected} onSelect={setSelected} zoom={zoom} onZoom={setZoom} />
           <MomentPanel report={report} selected={selected ?? latestShot(report.screenshots) ?? null} />
           <div className="totals">
-            <TotalsCard title="Categories" totals={report.byCategory} coloured />
+            <TotalsCard
+              title="Categories"
+              totals={report.byCategory}
+              coloured
+              onPick={(name) => {
+                if (name === UNCATEGORIZED) {
+                  setShowUncategorized(true);
+                }
+              }}
+              pickable={(name) => name === UNCATEGORIZED}
+            />
             <TotalsCard title="Apps" totals={report.byApp} />
             <TotalsCard title="Projects" totals={report.byProject} empty="No WebStorm projects" />
             <TotalsCard title="Websites" totals={report.byDomain} empty="No Chrome tabs" />
           </div>
+          {showUncategorized && (
+            <UncategorizedPanel
+              timeline={report.timeline}
+              onClose={() => setShowUncategorized(false)}
+              onRuleAdded={() => void load()}
+            />
+          )}
         </>
       )}
     </section>
@@ -408,17 +429,23 @@ function latestShot(shots: ScreenshotInfo[]): number | undefined {
  * @param props.totals The totals, largest first.
  * @param props.coloured Colour bars by category.
  * @param props.empty What to say when there are none.
+ * @param props.pickable Says which names can be clicked; none can when left out.
+ * @param props.onPick Called with a clicked name.
  */
 function TotalsCard({
   title,
   totals,
   coloured = false,
   empty = "Nothing yet",
+  pickable = () => false,
+  onPick = () => {},
 }: {
   title: string;
   totals: Total[];
   coloured?: boolean;
   empty?: string;
+  pickable?: (name: string) => boolean;
+  onPick?: (name: string) => void;
 }) {
   const largest = totals[0]?.ms ?? 1;
   return (
@@ -430,9 +457,15 @@ function TotalsCard({
         <ul className="total-list">
           {totals.slice(0, TOP_N).map((total) => (
             <li key={total.name}>
-              <span className="total-name" title={total.name}>
-                {total.name}
-              </span>
+              {pickable(total.name) ? (
+                <button className="link total-name" title={`See what's in ${total.name}`} onClick={() => onPick(total.name)}>
+                  {total.name}
+                </button>
+              ) : (
+                <span className="total-name" title={total.name}>
+                  {total.name}
+                </span>
+              )}
               <span className="total-ms">{formatDuration(total.ms)}</span>
               <span
                 className="total-bar"
