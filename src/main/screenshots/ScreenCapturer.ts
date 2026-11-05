@@ -6,11 +6,14 @@ import type { ActivityStore } from "../activity/ActivityStore";
 /** Take a screenshot only while total CPU use is under this percentage (user's pick). */
 export const CPU_LIMIT_PERCENT = 30;
 
+/** How often a screenshot is taken: on every half-minute mark (user's pick). */
+export const SHOT_EVERY_MS = 30_000;
+
 /** While the CPU is busy, check again this often... */
 export const RETRY_EVERY_MS = 5_000;
 
-/** ...for up to this long after the minute mark, then skip the minute. */
-export const GIVE_UP_AFTER_MS = 30_000;
+/** ...for up to this long after the mark, then skip it. Half the gap, so a late shot sits nearer its own mark. */
+export const GIVE_UP_AFTER_MS = 15_000;
 
 /** One display's picture, already encoded. */
 export interface DisplayCapture {
@@ -19,8 +22,8 @@ export interface DisplayCapture {
   thumb: Buffer;
 }
 
-/** What one minute mark did, for tests and logs. */
-export type MinuteResult = "taken" | "skipped-busy" | "skipped-private" | "not-recording";
+/** What one mark did, for tests and logs. */
+export type ShotResult = "taken" | "skipped-busy" | "skipped-private" | "not-recording";
 
 /** What the capturer needs, injected so tests run without Electron or a real clock. */
 export interface ScreenCapturerDeps {
@@ -40,9 +43,9 @@ export interface ScreenCapturerDeps {
 }
 
 /**
- * Takes a screenshot of every display once a minute, on the minute mark, but only while the CPU is
- * quiet. A busy CPU is re-checked every 5 seconds for up to 30 seconds, then the minute is recorded as
- * skipped. Nothing queues: a missed minute is dropped and the next mark starts fresh. No shot is taken
+ * Takes a screenshot of every display every 30 seconds, on the :00 and :30 marks, but only while the CPU
+ * is quiet. A busy CPU is re-checked every 5 seconds for up to 15 seconds, then the mark is recorded as
+ * skipped. Nothing queues: a missed mark is dropped and the next one starts fresh. No shot is taken
  * while away, locked, asleep, or while an ignored app (Edge) is in front, and Edge windows elsewhere on
  * screen are cut out of the pictures. Files stay on this Mac.
  */
@@ -53,35 +56,35 @@ export class ScreenCapturer {
   /** @param deps The tracker, storage, clock and Electron capture calls. */
   constructor(private readonly deps: ScreenCapturerDeps) {}
 
-  /** Starts waiting for the next minute mark. */
+  /** Starts waiting for the next mark. */
   start(): void {
     this.stopped = false;
-    this.scheduleNextMinute();
+    this.scheduleNextMark();
   }
 
-  /** Sets a timer for the next whole minute; each run schedules the following one when it ends. */
-  private scheduleNextMinute(): void {
+  /** Sets a timer for the next half-minute mark; each run schedules the following one when it ends. */
+  private scheduleNextMark(): void {
     if (this.stopped) {
       return;
     }
     const now = this.deps.now();
-    const nextMinute = Math.floor(now / 60_000) * 60_000 + 60_000;
+    const nextMark = Math.floor(now / SHOT_EVERY_MS) * SHOT_EVERY_MS + SHOT_EVERY_MS;
     this.timer = setTimeout(() => {
       this.timer = null;
-      this.runMinute(nextMinute)
+      this.runMark(nextMark)
         .catch((error: unknown) => console.error("Time Center: screenshot failed", error))
-        .finally(() => this.scheduleNextMinute());
-    }, nextMinute - now);
+        .finally(() => this.scheduleNextMark());
+    }, nextMark - now);
   }
 
   /**
-   * Handles one minute mark: waits for a quiet CPU, then captures, or records the minute as skipped.
-   * @param minuteStart The minute mark.
+   * Handles one mark: waits for a quiet CPU, then captures, or records the mark as skipped.
+   * @param markStart The mark.
    * @returns What happened.
    */
-  async runMinute(minuteStart: number): Promise<MinuteResult> {
-    // Timers don't run while the Mac sleeps, so one can fire long after its minute: drop that minute.
-    if (this.deps.now() - minuteStart > GIVE_UP_AFTER_MS) {
+  async runMark(markStart: number): Promise<ShotResult> {
+    // Timers don't run while the Mac sleeps, so one can fire long after its mark: drop that mark.
+    if (this.deps.now() - markStart > GIVE_UP_AFTER_MS) {
       return "not-recording";
     }
     while (true) {
@@ -92,9 +95,9 @@ export class ScreenCapturer {
       if (cpu < CPU_LIMIT_PERCENT) {
         return (await this.capture(cpu)) > 0 ? "taken" : "skipped-private";
       }
-      if (this.deps.now() + RETRY_EVERY_MS - minuteStart > GIVE_UP_AFTER_MS) {
+      if (this.deps.now() + RETRY_EVERY_MS - markStart > GIVE_UP_AFTER_MS) {
         this.deps.activity.insertScreenshot({
-          takenAt: minuteStart,
+          takenAt: markStart,
           status: "skipped-busy",
           displayId: null,
           path: null,

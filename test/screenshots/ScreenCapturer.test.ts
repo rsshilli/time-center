@@ -66,13 +66,30 @@ describe("ScreenCapturer", () => {
     expect(await readdir(join(dir, localStamp(MINUTE).day))).toHaveLength(4);
   });
 
-  it("should wait for the CPU to calm down within 30 seconds", async () => {
+  it("should run on every half-minute mark", async () => {
+    const capturer = build([], { now: () => Date.now() });
+    const run = vi.spyOn(capturer, "runMark").mockResolvedValue("taken");
+    vi.useFakeTimers({ now: MINUTE + 10_000 });
+    try {
+      capturer.start();
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(run).toHaveBeenLastCalledWith(MINUTE + 30_000);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(run).toHaveBeenLastCalledWith(MINUTE + 60_000);
+      expect(run).toHaveBeenCalledTimes(2);
+    } finally {
+      capturer.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("should wait for the CPU to calm down within 15 seconds", async () => {
     const capturer = build([80, 80, 20]);
     expect(await startedRun(capturer)).toBe("taken");
     expect(rows()[0].cpuPercent).toBe(20);
   });
 
-  it("should skip the minute when the CPU stays busy for 30 seconds", async () => {
+  it("should skip the mark when the CPU stays busy for 15 seconds", async () => {
     const readings: number[] = [];
     const capturer = build([], {
       sampleCpuPercent: async () => {
@@ -83,7 +100,7 @@ describe("ScreenCapturer", () => {
     });
     expect(await startedRun(capturer)).toBe("skipped-busy");
     expect(rows()).toMatchObject([{ status: "skipped-busy", path: null, cpuPercent: 90 }]);
-    expect(Math.max(...readings)).toBeLessThanOrEqual(30_000);
+    expect(Math.max(...readings)).toBeLessThanOrEqual(15_000);
   });
 
   it("should take nothing while away", async () => {
@@ -127,7 +144,7 @@ describe("ScreenCapturer", () => {
     expect(rows()).toEqual([]);
   });
 
-  it("should drop a minute whose timer fired late, after the Mac slept", async () => {
+  it("should drop a mark whose timer fired late, after the Mac slept", async () => {
     clock = MINUTE + 10 * 60_000;
     expect(await startedRun(build([90]))).toBe("not-recording");
     expect(rows()).toEqual([]);
@@ -151,15 +168,15 @@ describe("localStamp", () => {
 });
 
 /**
- * Runs one minute on a capturer that has been started (stop() makes it refuse to capture).
+ * Runs one mark on a capturer that has been started (stop() makes it refuse to capture).
  * @param capturer The capturer.
- * @returns What the minute did.
+ * @returns What the mark did.
  */
 async function startedRun(capturer: ScreenCapturer) {
   vi.useFakeTimers();
   try {
     capturer.start();
-    return await capturer.runMinute(MINUTE);
+    return await capturer.runMark(MINUTE);
   } finally {
     capturer.stop();
     vi.useRealTimers();

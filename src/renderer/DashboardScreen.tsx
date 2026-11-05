@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { screenshotUrl, type DayReport, type ScreenshotInfo, type TimelineItem, type Total } from "../shared/ipc";
 import { colourFor, formatClock, formatDay, formatDuration } from "./format";
-import { MINUTE, SHIFT_STEP, stepMoment } from "./timelineStep";
+import { MINUTE, SHIFT_STEP, stepMoment, stepToChange } from "./timelineStep";
+import { keepInView, panRange, tickMoments, zoomRange, type TimeRange } from "./timelineZoom";
 
 /** While showing today, the dashboard re-reads the day this often. */
 const REFRESH_MS = 30_000;
 
 /** A screenshot counts as "at" the picked moment if it was taken within this long of it. */
-const SHOT_MATCH_MS = 90_000;
+const SHOT_MATCH_MS = 45_000;
 
 /** How many rows each totals card lists. */
 const TOP_N = 8;
@@ -20,13 +21,15 @@ const STRIP_SLOTS = 10;
 
 /**
  * One day of your time: how long you worked, were away, or were in an ignored app; a timeline coloured
- * by category that you click to see that minute's screenshots and window; and totals by category, app,
+ * by category that you click to see that moment's screenshots and window; and totals by category, app,
  * project and website.
  */
 export function DashboardScreen() {
   const [at, setAt] = useState(() => Date.now());
   const [report, setReport] = useState<DayReport | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  /** The zoomed-in stretch of the timeline, or null for the whole day. */
+  const [zoom, setZoom] = useState<TimeRange | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Counts requests, so a slow answer for a day you already left can't replace a newer one. */
   const latestRequest = useRef(0);
@@ -59,6 +62,7 @@ export function DashboardScreen() {
       if (startOfDay(at) !== startOfDay(Date.now())) {
         setAt(Date.now());
         setSelected(null);
+        setZoom(null);
         return;
       }
       void load();
@@ -68,25 +72,36 @@ export function DashboardScreen() {
 
   useEffect(() => {
     /**
-     * Left and Right step the picked moment a minute earlier or later; with Shift, ten minutes.
+     * Left and Right move the picked moment to the previous or next change of app or activity; with Shift,
+     * ten minutes; with Ctrl, one minute. Option does the same as Ctrl, since macOS keeps Ctrl + arrow for
+     * switching desktops when that shortcut is on.
      * @param event The key press.
      */
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
         return;
       }
-      if (!report || report.timeline.length === 0 || event.metaKey || event.ctrlKey || event.altKey || isTyping(event.target)) {
+      if (!report || report.timeline.length === 0 || event.metaKey || isTyping(event.target)) {
         return;
       }
       event.preventDefault();
-      const { from, to } = visibleRange(report);
+      const full = visibleRange(report);
       const direction = event.key === "ArrowLeft" ? -1 : 1;
-      const step = event.shiftKey ? SHIFT_STEP : MINUTE;
-      setSelected((current) => stepMoment(current ?? latestShot(report.screenshots) ?? to, direction, step, from, to));
+      const start = selected ?? latestShot(report.screenshots) ?? full.to;
+      let next: number;
+      if (event.shiftKey) {
+        next = stepMoment(start, direction, SHIFT_STEP, full.from, full.to);
+      } else if (event.ctrlKey || event.altKey) {
+        next = stepMoment(start, direction, MINUTE, full.from, full.to);
+      } else {
+        next = stepToChange(report.timeline, start, direction);
+      }
+      setSelected(next);
+      setZoom((current) => (current ? keepInView(current, full, next) : current));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [report]);
+  }, [report, selected]);
 
   /**
    * Moves to the day before or after.
@@ -98,6 +113,7 @@ export function DashboardScreen() {
     }
     setAt(direction === -1 ? report.dayStart - HOUR : report.dayEnd + HOUR);
     setSelected(null);
+    setZoom(null);
   };
 
   if (!report) {
@@ -121,6 +137,7 @@ export function DashboardScreen() {
             onClick={() => {
               setAt(Date.now());
               setSelected(null);
+              setZoom(null);
             }}
           >
             Today
@@ -142,7 +159,7 @@ export function DashboardScreen() {
         </p>
       ) : (
         <>
-          <Timeline report={report} selected={selected} onSelect={setSelected} />
+          <Timeline report={report} selected={selected} onSelect={setSelected} zoom={zoom} onZoom={setZoom} />
           <MomentPanel report={report} selected={selected ?? latestShot(report.screenshots) ?? null} />
           <div className="totals">
             <TotalsCard title="Categories" totals={report.byCategory} coloured />
@@ -195,39 +212,78 @@ function Stat({ label, ms }: { label: string; ms: number }) {
 
 /**
  * The day as a coloured bar, from the first hour with activity to the last, with a tick under it for
- * every minute that has a screenshot and a strip of thumbnails below. Clicking picks a moment.
+ * every moment that has a screenshot and a strip of thumbnails below. Clicking picks a moment. Once one is
+ * picked, the scroll wheel zooms in and out around it and a sideways swipe pans; double-click shows the
+ * whole day again.
  * @param props.report The day.
  * @param props.selected The picked moment, if any.
  * @param props.onSelect Called with the moment clicked.
+ * @param props.zoom The zoomed-in stretch, or null for the whole day.
+ * @param props.onZoom Called with the new stretch, or null for the whole day.
  */
 function Timeline({
   report,
   selected,
   onSelect,
+  zoom,
+  onZoom,
 }: {
   report: DayReport;
   selected: number | null;
   onSelect: (moment: number) => void;
+  zoom: TimeRange | null;
+  onZoom: (range: TimeRange | null) => void;
 }) {
-  const { from, to } = visibleRange(report);
+  const full = visibleRange(report);
+  const { from, to } = zoom ?? full;
   const span = to - from;
+  const bar = useRef<HTMLDivElement>(null);
   /**
    * Places a moment along the bar.
    * @param ms The moment.
    * @returns Its distance from the left edge, as a CSS percentage.
    */
   const percent = (ms: number) => `${((ms - from) / span) * 100}%`;
-  const hours = useMemo(() => {
-    const marks: number[] = [];
-    for (let hour = from; hour <= to; hour += HOUR) {
-      marks.push(hour);
-    }
-    return marks;
-  }, [from, to]);
-  const shotMinutes = useMemo(
-    () => [...new Set(report.screenshots.filter((shot) => shot.status === "taken").map((shot) => shot.takenAt))],
-    [report.screenshots],
+  const ticks = useMemo(() => tickMoments({ from, to }, report.dayStart), [from, to, report.dayStart]);
+  const shotMoments = useMemo(
+    () => [
+      ...new Set(
+        report.screenshots
+          .filter((shot) => shot.status === "taken" && shot.takenAt >= from && shot.takenAt <= to)
+          .map((shot) => shot.takenAt),
+      ),
+    ],
+    [report.screenshots, from, to],
   );
+
+  useEffect(() => {
+    const element = bar.current;
+    if (!element || selected === null) {
+      return undefined;
+    }
+    /**
+     * Scrolling up or down zooms around the picked moment (or the pointer, if the picked moment is off the
+     * bar); scrolling sideways pans. Registered by hand because React's wheel handler can't stop the page
+     * scrolling.
+     * @param event The wheel turn or trackpad swipe.
+     */
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 33 : 1;
+      const box = element.getBoundingClientRect();
+      const view = { from, to };
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+        onZoom(panRange(view, full, ((event.deltaX * scale) / box.width) * span));
+        return;
+      }
+      const pointer = from + ((event.clientX - box.left) / box.width) * span;
+      const anchor = selected >= from && selected <= to ? selected : pointer;
+      const next = zoomRange(view, full, anchor, event.deltaY * scale);
+      onZoom(next.from === full.from && next.to === full.to ? null : next);
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, [selected, from, to, span, full.from, full.to, onZoom]);
 
   /**
    * Turns a click on the bar into a moment.
@@ -240,7 +296,21 @@ function Timeline({
 
   return (
     <div className="timeline">
-      <div className="timeline-bar" onClick={pick} role="presentation">
+      <div className="timeline-zoom">
+        {zoom ? (
+          <>
+            <span>
+              Zoomed to {formatClock(from)} – {formatClock(to)}
+            </span>
+            <button className="link" onClick={() => onZoom(null)}>
+              Show whole day
+            </button>
+          </>
+        ) : (
+          selected !== null && <span>Scroll on the timeline to zoom in</span>
+        )}
+      </div>
+      <div className="timeline-bar" ref={bar} onClick={pick} onDoubleClick={() => onZoom(null)} role="presentation">
         {report.timeline.map((item, index) => (
           <div
             key={index}
@@ -256,14 +326,16 @@ function Timeline({
         {selected !== null && <div className="timeline-cursor" style={{ left: percent(selected) }} />}
       </div>
       <div className="timeline-shots">
-        {shotMinutes.map((minute) => (
-          <span key={minute} style={{ left: percent(minute) }} />
+        {shotMoments.map((moment) => (
+          <span key={moment} style={{ left: percent(moment) }} />
         ))}
       </div>
       <div className="timeline-hours">
-        {hours.map((hour) => (
-          <span key={hour} style={{ left: percent(hour) }}>
-            {new Date(hour).toLocaleTimeString(undefined, { hour: "numeric" })}
+        {ticks.map((tick) => (
+          <span key={tick} style={{ left: percent(tick) }}>
+            {new Date(tick).getMinutes() === 0
+              ? new Date(tick).toLocaleTimeString(undefined, { hour: "numeric" })
+              : new Date(tick).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
           </span>
         ))}
       </div>
@@ -273,14 +345,14 @@ function Timeline({
 }
 
 /**
- * What was going on at the picked moment: the window in front and that minute's screenshots.
+ * What was going on at the picked moment: the window in front and the nearest screenshots.
  * @param props.report The day.
  * @param props.selected The moment, or null when nothing is picked and there are no screenshots.
  */
 function MomentPanel({ report, selected }: { report: DayReport; selected: number | null }) {
   const [zoomed, setZoomed] = useState<number | null>(null);
   if (selected === null) {
-    return <p className="hint">Click the timeline, or press ← →, to see what you were doing at that moment.</p>;
+    return <p className="hint">Click the timeline, or press ← → to jump between apps, to see what you were doing at that moment.</p>;
   }
   const item = report.timeline.find((candidate) => candidate.start <= selected && selected < candidate.end);
   const shots = shotsNear(report.screenshots, selected);
@@ -309,7 +381,7 @@ function MomentPanel({ report, selected }: { report: DayReport; selected: number
           ))}
         </div>
       ) : (
-        <p className="muted">No screenshot within a minute and a half of this moment.</p>
+        <p className="muted">No screenshot within 45 seconds of this moment.</p>
       )}
       {zoomed !== null && (
         <div className="lightbox" onClick={() => setZoomed(null)} role="presentation">
@@ -460,7 +532,7 @@ function describeItem(item: TimelineItem): string {
  * Finds the screenshots of every display taken closest to a moment.
  * @param shots The day's screenshots.
  * @param moment The moment.
- * @returns That minute's screenshots, or none if the closest is too far away.
+ * @returns Those screenshots, or none if the closest is too far away.
  */
 function shotsNear(shots: ScreenshotInfo[], moment: number): ScreenshotInfo[] {
   let best: number | null = null;
