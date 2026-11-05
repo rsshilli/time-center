@@ -1,0 +1,26 @@
+appId: org.shillington.timecenter
+productName: Time Center
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/main/**
+  - out/preload/**
+  - out/renderer/**
+  - package.json
+asar: true
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: arm64
+  # No signing certificate on this Mac yet, so the build is ad-hoc signed. macOS ties permissions to the
+  # signature, so each rebuild is asked for them again until a stable certificate is used here.
+  identity: "-"
+  hardenedRuntime: false
+  extendInfo:
+    LSUIElement: true
+    NSMicrophoneUsageDescription: Time Center records your side of a meeting so it can be transcribed on this Mac.
+    NSAudioCaptureUsageDescription: Time Center records the other side of a meeting so it can be transcribed on this Mac.
+    NSAppleEventsUsageDescription: Time Center reads the address of the Chrome tab you're on to show where your time goes.
+    NSScreenCaptureUsageDescription: Time Center reads window names and takes a screenshot once a minute, kept only on this Mac.

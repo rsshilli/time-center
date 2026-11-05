@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist/
+.github/
+.idea/
+.qbdcode/
+PROGRESS.md
+spike/**/recordings/
+*.log
+.env
+.agent-errors.jsonl
