@@ -67,7 +67,8 @@ export class SegmentRecorder {
       return;
     }
     const fields = SegmentRecorder.describe(sample);
-    const key = [fields.kind, fields.bundleId, fields.title, fields.url].join("\u0001");
+    // A call starting or ending starts a new stretch, so each stretch is wholly on a call or not.
+    const key = [fields.kind, fields.bundleId, fields.title, fields.url, fields.onCall].join("\u0001");
     const open = this.open;
     if (open && this.isContiguous(at)) {
       this.extend(open, at);
@@ -121,7 +122,7 @@ export class SegmentRecorder {
    */
   private static describe(sample: WindowSample) {
     if (sample.ignored) {
-      return { kind: "untracked" as const, app: null, bundleId: null, title: null, url: null, domain: null, project: null };
+      return { kind: "untracked" as const, app: null, bundleId: null, title: null, url: null, domain: null, project: null, onCall: false };
     }
     return {
       kind: "active" as const,
@@ -131,6 +132,7 @@ export class SegmentRecorder {
       url: sample.url,
       domain: domainOf(sample.url),
       project: projectOf(sample.bundleId, sample.title),
+      onCall: sample.onCall === true,
     };
   }
 

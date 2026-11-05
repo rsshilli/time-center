@@ -1,0 +1,5 @@
+- generic [active] [ref=e1]:
+  - button "Turn off microphone" [ref=e2]: mic
+  - button "Join now" [disabled] [ref=e3]
+  - button "Join now from another device" [ref=e4]
+  - paragraph [ref=e5]: not clicked

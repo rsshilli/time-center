@@ -25,7 +25,9 @@ const api: TimeCenterApi = {
   setAutoJoin: (on) => ipcRenderer.invoke(IPC.setAutoJoin, on),
   skipMeeting: (eventId) => ipcRenderer.invoke(IPC.skipMeeting, eventId),
   joinMeetingNow: (eventId) => ipcRenderer.invoke(IPC.joinMeetingNow, eventId),
-  showExtensionFolder: () => ipcRenderer.invoke(IPC.showExtensionFolder),
+  setMeetingType: (eventId, type) => ipcRenderer.invoke(IPC.setMeetingType, eventId, type),
+  getMeetingTypeStatus: () => ipcRenderer.invoke(IPC.getMeetingTypeStatus),
+  sortMeetingsNow: () => ipcRenderer.invoke(IPC.sortMeetingsNow),
 };
 
 contextBridge.exposeInMainWorld("timeCenter", api);

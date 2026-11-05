@@ -14,11 +14,12 @@ import { CalendarClient } from "./calendar/CalendarClient";
 import { CalendarStore } from "./calendar/CalendarStore";
 import { CalendarSync } from "./calendar/CalendarSync";
 import { isAutoJoinOn, registerCalendarIpc } from "./calendar/calendarIpc";
-import { installExtensionCopy } from "./calendar/extensionFolder";
 import { GoogleAuth, builtInGoogleClient } from "./calendar/GoogleAuth";
 import { JoinScheduler, type Notice } from "./calendar/JoinScheduler";
 import { MeetingJoiner, openInChrome } from "./calendar/MeetingJoiner";
-import { extensionKey, signMarker } from "./calendar/markerSigner";
+import { BedrockHaiku } from "./calendar/BedrockHaiku";
+import { MeetingTyper } from "./calendar/MeetingTyper";
+import { registerMeetingTypeIpc } from "./calendar/meetingTypeIpc";
 import type { CalendarEvent } from "./calendar/meetingLinks";
 import { ActivityStore } from "./activity/ActivityStore";
 import { ActivityTracker, SAMPLE_INTERVAL_SECONDS } from "./activity/ActivityTracker";
@@ -106,6 +107,7 @@ async function main(): Promise<void> {
   registerIpcHandlers({
     store,
     activity,
+    calendar: calendar.store,
     permissions,
     backupService,
     scheduler,
@@ -113,13 +115,11 @@ async function main(): Promise<void> {
     onBackupChanged: () => tray.refresh(backupState.lastError),
     onIgnoredAppsChanged: () => tracker.restart(),
   });
-  const extensionPath = join(app.getPath("userData"), "chrome-extension");
   registerCalendarIpc({
     auth: calendar.auth,
     sync: calendar.sync,
     scheduler: calendar.joins,
     settings: store,
-    extensionPath,
     pickClientFile: async () => {
       const picked = await dialog.showOpenDialog({
         title: "Choose the Google client file (credentials.json)",
@@ -128,11 +128,12 @@ async function main(): Promise<void> {
       });
       return picked.canceled || !picked.filePaths[0] ? null : readFile(picked.filePaths[0], "utf8");
     },
-    showFolder: async (path) => shell.showItemInFolder(join(path, "manifest.json")),
     onChange: () => tray.refresh(),
   });
-  installExtensionCopy(extensionSourcePath(), extensionPath, extensionKey(store)).catch((error: unknown) => {
-    console.error("Time Center: couldn't copy the Chrome extension", error);
+  registerMeetingTypeIpc({
+    calendar: calendar.store,
+    typer: calendar.typer,
+    now: () => Date.now(),
   });
   handleScreenshotScheme(activity);
   tray.create();
@@ -208,14 +209,16 @@ function createTracker(activity: ActivityStore, ignoredApps: () => string[]): Ac
 
 /**
  * Builds the calendar side: Google sign-in (the client built into the app, the refresh token kept with
- * the Keychain key), the five-minute sync of the main calendar, and the join timer with its notices.
+ * the Keychain key), the five-minute sync of the main calendar, the join timer with its notices, and
+ * Haiku's sorting of meetings into types after each sync.
  * @param store The database.
  * @param onChange Called when a meeting's state or the sign-in changes, to refresh the tray.
- * @returns The sign-in, the sync and the join timer, not yet started.
+ * @returns The sign-in, the sync, the join timer, the meetings table and the sorter.
  */
 function createCalendar(store: Store, onChange: () => void) {
+  const secrets = new SecretStore(store, safeStorage);
   const auth = new GoogleAuth({
-    secrets: new SecretStore(store, safeStorage),
+    secrets,
     builtInClient: builtInGoogleClient(),
     openExternal: (url) => shell.openExternal(url),
     fetch,
@@ -230,14 +233,20 @@ function createCalendar(store: Store, onChange: () => void) {
     onSynced: () => {
       joins.tick();
       onChange();
+      void typer.typeNew();
     },
+    now: () => Date.now(),
+  });
+  const typer = new MeetingTyper({
+    calendar: calendarStore,
+    haiku: new BedrockHaiku(),
+    ownEmail: () => sync.account(),
     now: () => Date.now(),
   });
   const joiner = new MeetingJoiner({
     openExternal: (url) => shell.openExternal(url),
     openInChrome,
     account: () => sync.account(),
-    signMarker: (url) => signMarker(extensionKey(store), url, Date.now()),
   });
   const joins: JoinScheduler = new JoinScheduler({
     calendar: calendarStore,
@@ -248,7 +257,7 @@ function createCalendar(store: Store, onChange: () => void) {
     onChange,
     now: () => Date.now(),
   });
-  return { auth, sync, joins };
+  return { auth, sync, joins, store: calendarStore, typer };
 }
 
 /**
@@ -277,14 +286,6 @@ function showJoinNotice(event: CalendarEvent, joinAt: number, onSkip: () => void
  */
 function showJoinFailure(message: string): void {
   new Notification({ title: "Couldn't join the meeting", body: message.replace(/^Error: /, "") }).show();
-}
-
-/**
- * Finds the Chrome extension shipped with the app.
- * @returns Contents/Resources/extension when packaged; the repo's extension folder in dev.
- */
-function extensionSourcePath(): string {
-  return app.isPackaged ? join(process.resourcesPath, "extension") : join(app.getAppPath(), "extension");
 }
 
 /**

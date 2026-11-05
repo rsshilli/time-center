@@ -69,6 +69,8 @@ describe("JoinScheduler", () => {
         response: "accepted",
         provider: "meet",
         joinUrl: "https://meet.google.com/abc-defg-hij",
+        seriesId: `e${index}`,
+        attendees: [],
         ...event,
       })),
       clock,

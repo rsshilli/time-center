@@ -515,6 +515,46 @@ button.link.total-name {
   white-space: nowrap;
 }
 
+/* Meetings today, with a type picker each */
+
+.meeting-types {
+  margin-top: 10px;
+}
+
+.meeting-type-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.meeting-type-list li {
+  display: grid;
+  grid-template-columns: 70px 1fr 90px 210px 90px;
+  gap: 10px;
+  align-items: center;
+}
+
+.meeting-type-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meeting-type-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.meeting-type-ms,
+.meeting-type-source {
+  font-size: 12px;
+}
+
 /* Category rules */
 
 .rules {

@@ -1,11 +1,24 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { CalendarEvent } from "./meetingLinks";
+import { MEETING_TYPE_LABELS, type MeetingType } from "../../shared/ipc";
+import type { Attendee, CalendarEvent } from "./meetingLinks";
 
 /** What happened at a meeting's join time. */
 export type JoinStatus = "joined" | "skipped" | "failed";
 
+/** Who set a meeting's type. */
+export type MeetingTypeSource = "haiku" | "you";
+
+/** A meeting with its type, which it shares with every occurrence of its repeating series. */
+export interface TypedEvent extends CalendarEvent {
+  type: MeetingType | null;
+  typeSource: MeetingTypeSource | null;
+}
+
 /** The columns every meeting query reads. */
-const SELECT_EVENTS = "SELECT event_id, title, starts_at, ends_at, response, provider, join_url FROM calendar_events";
+const EVENT_COLUMNS = "event_id, title, starts_at, ends_at, response, provider, join_url, attendees, series_id";
+
+/** The start of every query that reads whole meetings. */
+const SELECT_EVENTS = `SELECT ${EVENT_COLUMNS} FROM calendar_events`;
 
 /** A calendar_events row as SQLite returns it. */
 interface EventRow {
@@ -16,6 +29,14 @@ interface EventRow {
   response: string;
   provider: CalendarEvent["provider"];
   join_url: string | null;
+  attendees: string;
+  series_id: string | null;
+}
+
+/** A calendar_events row joined to its series' type. */
+interface TypedEventRow extends EventRow {
+  type: string | null;
+  source: MeetingTypeSource | null;
 }
 
 /**
@@ -37,8 +58,8 @@ export class CalendarStore {
   replaceEvents(from: number, to: number, events: CalendarEvent[], syncedAt: number): void {
     const insert = this.db.prepare(
       `INSERT OR REPLACE INTO calendar_events
-         (event_id, title, starts_at, ends_at, response, provider, join_url, synced_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (event_id, title, starts_at, ends_at, response, provider, join_url, attendees, series_id, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     this.db.exec("BEGIN");
     try {
@@ -52,6 +73,8 @@ export class CalendarStore {
           event.response,
           event.provider,
           event.joinUrl,
+          JSON.stringify(event.attendees),
+          event.seriesId,
           iso(syncedAt),
         );
       }
@@ -73,6 +96,63 @@ export class CalendarStore {
       .prepare(`${SELECT_EVENTS} WHERE ends_at > ? AND starts_at < ? ORDER BY starts_at, event_id`)
       .all(iso(from), iso(to)) as unknown as EventRow[];
     return rows.map(toEvent);
+  }
+
+  /**
+   * Lists the meetings overlapping a window with their types, earliest first.
+   * @param from Meetings ending after this.
+   * @param to Meetings starting before this.
+   * @returns The meetings, declined ones included.
+   */
+  listTypedEvents(from: number, to: number): TypedEvent[] {
+    const rows = this.db
+      .prepare(
+        `SELECT ${EVENT_COLUMNS.split(", ").map((column) => `e.${column}`).join(", ")}, t.type, t.source
+         FROM calendar_events e LEFT JOIN meeting_types t ON t.series_id = e.series_id
+         WHERE e.ends_at > ? AND e.starts_at < ? ORDER BY e.starts_at, e.event_id`,
+      )
+      .all(iso(from), iso(to)) as unknown as TypedEventRow[];
+    return rows.map((row) => ({
+      ...toEvent(row),
+      type: isMeetingType(row.type) ? row.type : null,
+      typeSource: isMeetingType(row.type) ? row.source : null,
+    }));
+  }
+
+  /**
+   * Lists the repeating series (and one-off meetings) that have no type yet, one occurrence each — the
+   * latest — newest first. Declined meetings are left out, since their time never counts, and so are
+   * blocks with nobody else invited ("Drive to …"), which have nothing for Haiku to go on.
+   * @param limit The most to return.
+   * @returns One meeting per series.
+   */
+  listUntypedSeries(limit: number): CalendarEvent[] {
+    const rows = this.db
+      .prepare(
+        `SELECT ${EVENT_COLUMNS}, MAX(starts_at) AS latest FROM calendar_events
+         WHERE response != 'declined' AND attendees != '[]' AND series_id NOT IN (SELECT series_id FROM meeting_types)
+         GROUP BY series_id ORDER BY latest DESC LIMIT ?`,
+      )
+      .all(limit) as unknown as EventRow[];
+    return rows.map(toEvent);
+  }
+
+  /**
+   * Records a series' type. Haiku's guess never replaces one you set; yours always replaces the guess.
+   * @param seriesId The repeating series, or a one-off meeting's id.
+   * @param type Its type.
+   * @param source Who decided.
+   * @param at When.
+   */
+  setMeetingType(seriesId: string, type: MeetingType, source: MeetingTypeSource, at: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO meeting_types (series_id, type, source, decided_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (series_id) DO UPDATE SET type = excluded.type, source = excluded.source,
+           decided_at = excluded.decided_at
+         WHERE excluded.source = 'you' OR meeting_types.source = 'haiku'`,
+      )
+      .run(seriesId, type, source, iso(at));
   }
 
   /**
@@ -153,7 +233,32 @@ function toEvent(row: EventRow): CalendarEvent {
     response: row.response,
     provider: row.provider,
     joinUrl: row.join_url,
+    seriesId: row.series_id ?? row.event_id,
+    attendees: parseAttendees(row.attendees),
   };
+}
+
+/**
+ * Reads the stored attendee list, treating anything unreadable as nobody.
+ * @param text The JSON text.
+ * @returns The attendees.
+ */
+function parseAttendees(text: string): Attendee[] {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed) ? (parsed as Attendee[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Says whether stored text names a meeting type this version knows.
+ * @param type The text.
+ * @returns True when it does.
+ */
+export function isMeetingType(type: unknown): type is MeetingType {
+  return typeof type === "string" && Object.hasOwn(MEETING_TYPE_LABELS, type);
 }
 
 /**

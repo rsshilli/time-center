@@ -1,6 +1,7 @@
 import type { CategoryRule, DayReport, TimelineItem, Total } from "../../shared/ipc";
 import type { ActivityStore } from "./ActivityStore";
 import { AWAY, UNTRACKED, categorize } from "./classify";
+import { splitMeetingTime, type MeetingForDay } from "./meetingTime";
 
 /**
  * Builds everything the dashboard shows for the local day containing a moment. Categories are worked
@@ -8,15 +9,17 @@ import { AWAY, UNTRACKED, categorize } from "./classify";
  * @param store The activity tables.
  * @param rules The category rules.
  * @param at Any moment in the day.
+ * @param listMeetings Reads the calendar meetings overlapping a window, with their types.
  * @returns The day's report.
  */
 export function buildDayReport(
   store: Pick<ActivityStore, "listSegments" | "listScreenshots">,
   rules: readonly CategoryRule[],
   at: number,
+  listMeetings: (from: number, to: number) => readonly MeetingForDay[] = () => [],
 ): DayReport {
   const { dayStart, dayEnd } = localDayBounds(at);
-  const timeline: TimelineItem[] = store
+  const ruled: TimelineItem[] = store
     .listSegments(dayStart, dayEnd)
     .map((segment) => ({
       start: Math.max(segment.startedAt, dayStart),
@@ -28,8 +31,10 @@ export function buildDayReport(
       url: segment.url,
       domain: segment.domain,
       project: segment.project,
+      onCall: segment.onCall === true,
     }))
     .filter((item) => item.end > item.start);
+  const { timeline, meetings } = splitMeetingTime(ruled, listMeetings(dayStart, dayEnd));
   const active = timeline.filter((item) => item.kind === "active");
   return {
     dayStart,
@@ -48,6 +53,7 @@ export function buildDayReport(
     byApp: totalBy(active, (item) => item.app),
     byProject: totalBy(active, (item) => item.project),
     byDomain: totalBy(active, (item) => item.domain),
+    meetings,
   };
 }
 

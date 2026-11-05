@@ -1,3 +1,4 @@
+import { localDayBounds } from "../activity/dayReport";
 import type { CalendarClient } from "./CalendarClient";
 import type { CalendarStore } from "./CalendarStore";
 import { toCalendarEvent, type CalendarEvent } from "./meetingLinks";
@@ -86,7 +87,8 @@ export class CalendarSync {
       return;
     }
     const now = this.deps.now();
-    const from = now - SYNC_BACK_MS;
+    // From local midnight at the latest, so today's earlier meetings carry their attendees for sorting.
+    const from = Math.min(now - SYNC_BACK_MS, localDayBounds(now).dayStart);
     const to = now + SYNC_AHEAD_MS;
     try {
       if (!this.account()) {

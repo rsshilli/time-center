@@ -5,8 +5,8 @@ const PRIMARY_CALENDAR_URL = "https://www.googleapis.com/calendar/v3/calendars/p
 
 /** Only the event fields meetingLinks reads, to keep each answer small. */
 const EVENT_FIELDS =
-  "nextPageToken,items(id,status,summary,eventType,start,end,location,description,hangoutLink," +
-  "conferenceData/entryPoints(entryPointType,uri),attendees(self,responseStatus))";
+  "nextPageToken,items(id,recurringEventId,status,summary,eventType,start,end,location,description,hangoutLink," +
+  "conferenceData/entryPoints(entryPointType,uri),attendees(email,displayName,self,resource,responseStatus))";
 
 /**
  * Reads the main Google calendar with an access token. Repeating meetings come back one row per

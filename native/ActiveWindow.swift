@@ -18,6 +18,7 @@ import AppKit
 import ApplicationServices
 import CoreAudio
 import Foundation
+import ScriptingBridge
 import ImageIO
 import ScreenCaptureKit
 import UniformTypeIdentifiers
@@ -80,7 +81,7 @@ final class Reporter {
         let title = focusedWindowTitle(pid: app.processIdentifier) ?? frontWindowName(pid: app.processIdentifier)
         var url: String? = nil
         if let bundleId, isChromeBrowser(bundleId) {
-            url = chromeUrl(bundleId: bundleId, title: title)
+            url = chromeUrl(pid: app.processIdentifier, title: title)
         } else {
             // Coming back to Chrome later must ask again, even if the title happens to match.
             lastUrlKey = nil
@@ -124,27 +125,48 @@ final class Reporter {
 
     /// The active Chrome tab's address. Needs the Automation permission for Chrome; nil without it.
     /// Without a title (no Accessibility or Screen Recording) nothing tells tabs apart, so it asks every tick.
-    private func chromeUrl(bundleId: String, title: String?) -> String? {
-        let key = title.map { bundleId + "\u{1}" + $0 }
+    /// Asks the Chrome in front by process id: asking by bundle id reaches whichever copy macOS picks, and
+    /// with a second copy running (a Playwright test browser) that was the wrong one. Seen 2026-11-05: real
+    /// tabs recorded as `localhost:5290` and `127.0.0.1:50558` for 1h 18m; the probe by pid read them right.
+    private func chromeUrl(pid: pid_t, title: String?) -> String? {
+        let key = title.map { "\(pid)\u{1}" + $0 }
         if let key, key == lastUrlKey, Date().timeIntervalSince(lastUrlAt) < urlMaxAge {
             return lastUrl
         }
-        let source = """
-        tell application id "\(bundleId)"
-          if (count of windows) > 0 then return URL of active tab of front window
-        end tell
-        """
-        var error: NSDictionary?
-        let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
-        // On failure, don't cache, so a permission granted later is picked up on the next tick.
-        guard error == nil else {
+        let chrome = SBApplication(processIdentifier: pid)
+        let windows = (chrome?.value(forKey: "windows") as? SBElementArray)?.compactMap { $0 as? SBObject } ?? []
+        let tab = frontTab(windows, title: title)
+        let url = tab?.value(forKey: "URL") as? String
+        // On failure (no Automation permission yet, or no window), don't cache, so a permission granted
+        // later is picked up on the next tick. lastError is a method: `lastError == nil` without the call
+        // compares the method itself, which is never nil, and dropped every address (2026-11-05).
+        guard chrome?.lastError() == nil, let url else {
             lastUrlKey = nil
             return nil
         }
         lastUrlKey = key
         lastUrlAt = Date()
-        lastUrl = result?.stringValue
-        return lastUrl
+        lastUrl = url
+        return url
+    }
+
+    /// The active tab of the window you're looking at: the first window whose active tab's title starts the
+    /// focused window's title (Chrome adds " - Google Chrome - <profile>" and the like), else the first window.
+    /// Chrome's first window isn't always the one in front: the pinned Calendar tab was recorded as
+    /// `about:blank` three times during a Meet (2026-11-05, rows 980/1011/1013) — suspected, not verified, to
+    /// be Meet's floating picture-in-picture window being listed first.
+    private func frontTab(_ windows: [SBObject], title: String?) -> SBObject? {
+        let tabs = windows.compactMap { $0.value(forKey: "activeTab") as? SBObject }
+        guard let title else {
+            return tabs.first
+        }
+        let match = tabs.first { tab in
+            guard let tabTitle = tab.value(forKey: "title") as? String, !tabTitle.isEmpty else {
+                return false
+            }
+            return title.hasPrefix(tabTitle)
+        }
+        return match ?? tabs.first
     }
 }
 

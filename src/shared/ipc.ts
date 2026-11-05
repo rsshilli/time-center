@@ -63,6 +63,8 @@ export interface TimelineItem {
   url: string | null;
   domain: string | null;
   project: string | null;
+  /** Whether you were on a call (some app using the microphone). Unset reads as no. */
+  onCall?: boolean;
 }
 
 /** One minute's screenshot of one display, or a minute skipped because the CPU was busy. */
@@ -79,6 +81,55 @@ export interface Total {
   ms: number;
 }
 
+/** The kinds of meeting the Categories card splits meeting time into. */
+export type MeetingType = "one-on-one" | "dsu" | "management" | "architecture" | "customer" | "other";
+
+/** Each meeting type's name on screen, in the order the type picker lists them. */
+export const MEETING_TYPE_LABELS: Readonly<Record<MeetingType, string>> = {
+  "one-on-one": "One on ones",
+  dsu: "DSU",
+  management: "Management/Exec",
+  architecture: "Architecture/product review",
+  customer: "Customer",
+  other: "Other",
+};
+
+/** The category meeting time goes in while its meeting's type isn't known yet. */
+export const MEETINGS_CATEGORY = "Meetings";
+
+/**
+ * Names the category for one type of meeting.
+ * @param type The meeting's type, or null while it isn't known.
+ * @returns e.g. "Meetings · One on ones", or plain "Meetings".
+ */
+export function meetingCategory(type: MeetingType | null): string {
+  return type ? `${MEETINGS_CATEGORY} · ${MEETING_TYPE_LABELS[type]}` : MEETINGS_CATEGORY;
+}
+
+/** One of the day's calendar meetings on the dashboard, with its type. Times are milliseconds since 1970. */
+export interface DayMeeting {
+  eventId: string;
+  title: string;
+  start: number;
+  end: number;
+  type: MeetingType | null;
+  /** Who set the type: Claude Haiku's guess, or you. Null while it isn't known. */
+  typeSource: "haiku" | "you" | null;
+  /** Whether you were in a call during it; only then does its time count as the meeting's. */
+  attended: boolean;
+  /** Active time counted toward it. */
+  ms: number;
+}
+
+/** What Settings shows about sorting meetings into types with Claude Haiku on Amazon Bedrock. */
+export interface MeetingTypeStatus {
+  /** Where the AWS keys came from, once a sort has looked; null before. */
+  via: string | null;
+  /** When Haiku last sorted meetings. */
+  lastRunAt: number | null;
+  lastError: string | null;
+}
+
 /** Everything the dashboard shows for one day. */
 export interface DayReport {
   /** Local midnight that starts the day, in milliseconds since 1970. */
@@ -93,6 +144,8 @@ export interface DayReport {
   byApp: Total[];
   byProject: Total[];
   byDomain: Total[];
+  /** The day's calendar meetings you didn't decline, earliest first. */
+  meetings: DayMeeting[];
 }
 
 /** The meeting services the app can join. */
@@ -136,8 +189,6 @@ export interface CalendarStatus {
   autoJoin: boolean;
   lastSyncAt: number | null;
   lastError: string | null;
-  /** The folder to load into Chrome as the companion extension. */
-  extensionPath: string;
   /** Today's remaining meetings and the next day's, soonest first. */
   meetings: MeetingInfo[];
 }
@@ -177,7 +228,9 @@ export const IPC = {
   setAutoJoin: "calendar:set-auto-join",
   skipMeeting: "calendar:skip",
   joinMeetingNow: "calendar:join-now",
-  showExtensionFolder: "calendar:show-extension",
+  setMeetingType: "meetings:set-type",
+  getMeetingTypeStatus: "meetings:type-status",
+  sortMeetingsNow: "meetings:sort-now",
 } as const;
 
 /** The API the preload script exposes to the renderer as `window.timeCenter`. */
@@ -220,6 +273,10 @@ export interface TimeCenterApi {
   skipMeeting(eventId: string): Promise<CalendarStatus>;
   /** Joins the meeting straight away. */
   joinMeetingNow(eventId: string): Promise<CalendarStatus>;
-  /** Shows the Chrome extension's folder in Finder. */
-  showExtensionFolder(): Promise<void>;
+  /** Sets a meeting's type yourself; every occurrence of a repeating meeting takes it, and Haiku won't change it. */
+  setMeetingType(eventId: string, type: MeetingType): Promise<void>;
+  /** Where the AWS keys came from and how Haiku's last sort went. */
+  getMeetingTypeStatus(): Promise<MeetingTypeStatus>;
+  /** Sorts any meetings still without a type now, and returns how it went. */
+  sortMeetingsNow(): Promise<MeetingTypeStatus>;
 }

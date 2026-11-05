@@ -13,6 +13,8 @@ export interface StoredSegment {
   url: string | null;
   domain: string | null;
   project: string | null;
+  /** Whether you were on a call (some app using the microphone) the whole stretch. Unset reads as no. */
+  onCall?: boolean;
 }
 
 /** A new stretch: everything but the id. */
@@ -50,8 +52,8 @@ export class ActivityStore {
   insertSegment(segment: NewSegment): number {
     const result = this.db
       .prepare(
-        `INSERT INTO activity_segments (started_at, ended_at, kind, app, bundle_id, title, url, domain, project)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO activity_segments (started_at, ended_at, kind, app, bundle_id, title, url, domain, project, on_call)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         iso(segment.startedAt),
@@ -63,6 +65,7 @@ export class ActivityStore {
         segment.url,
         segment.domain,
         segment.project,
+        segment.onCall ? 1 : 0,
       );
     return Number(result.lastInsertRowid);
   }
@@ -108,6 +111,7 @@ export class ActivityStore {
       url: textOrNull(row.url),
       domain: textOrNull(row.domain),
       project: textOrNull(row.project),
+      onCall: Number(row.on_call) === 1,
     }));
   }
 

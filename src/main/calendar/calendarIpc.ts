@@ -13,12 +13,8 @@ export interface CalendarIpcDeps {
   sync: Pick<CalendarSync, "syncNow" | "status" | "account" | "reset">;
   scheduler: Pick<JoinScheduler, "meetings" | "skip" | "joinNow" | "tick">;
   settings: { getSetting(key: string): string | null; setSetting(key: string, value: string | null): void };
-  /** The folder Chrome loads the companion extension from. */
-  extensionPath: string;
   /** Asks for a credentials.json and returns its text, or null when cancelled. */
   pickClientFile(): Promise<string | null>;
-  /** Shows a folder in Finder. */
-  showFolder(path: string): Promise<void>;
   /** Called when meetings or the sign-in change, so the tray can refresh. */
   onChange(): void;
 }
@@ -67,7 +63,6 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     await deps.scheduler.joinNow(assertEventId(eventId));
     return buildCalendarStatus(deps);
   });
-  ipcMain.handle(IPC.showExtensionFolder, () => deps.showFolder(deps.extensionPath));
 }
 
 /**
@@ -83,7 +78,6 @@ export function buildCalendarStatus(deps: CalendarIpcDeps): CalendarStatus {
     account: signedIn ? deps.sync.account() : null,
     autoJoin: isAutoJoinOn(deps.settings),
     ...deps.sync.status(),
-    extensionPath: deps.extensionPath,
     meetings: signedIn ? deps.scheduler.meetings() : [],
   };
 }

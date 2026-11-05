@@ -6,6 +6,7 @@ import { buildDayReport } from "./activity/dayReport";
 import { IGNORED_APPS_SETTING, assertIgnoredApps, parseIgnoredApps } from "./activity/ignoredApps";
 import type { BackupScheduler } from "./backup/BackupScheduler";
 import type { BackupService } from "./backup/BackupService";
+import type { CalendarStore } from "./calendar/CalendarStore";
 import type { Permissions } from "./permissions/Permissions";
 import { restoreLatestBackup } from "./restoreLatestBackup";
 import type { Store } from "./store/Store";
@@ -14,6 +15,8 @@ import type { Store } from "./store/Store";
 export interface IpcDependencies {
   store: Store;
   activity: ActivityStore;
+  /** The calendar's meetings, whose types split the day's meeting time. */
+  calendar: Pick<CalendarStore, "listTypedEvents">;
   permissions: Permissions;
   backupService: BackupService;
   scheduler: BackupScheduler;
@@ -36,7 +39,9 @@ const PERMISSION_KINDS: readonly PermissionKind[] = ["accessibility", "screen", 
  */
 export function registerIpcHandlers(deps: IpcDependencies): void {
   ipcMain.handle(IPC.getDay, (_event, at: unknown) =>
-    buildDayReport(deps.activity, parseRules(deps.store.getSetting(RULES_SETTING)), assertMoment(at)),
+    buildDayReport(deps.activity, parseRules(deps.store.getSetting(RULES_SETTING)), assertMoment(at), (from, to) =>
+      deps.calendar.listTypedEvents(from, to),
+    ),
   );
   ipcMain.handle(IPC.getRules, () => parseRules(deps.store.getSetting(RULES_SETTING)));
   ipcMain.handle(IPC.saveRules, (_event, rules: unknown) => {

@@ -1,3 +1,5 @@
+import { meetingCategory } from "../shared/ipc";
+
 /** Colours for categories, picked by name so a category keeps its colour from day to day. */
 const PALETTE = ["#2f6fed", "#1f8a4c", "#d9480f", "#7b3fe4", "#0c8599", "#c2255c", "#e8a33d", "#5c7cfa", "#37b24d", "#a61e4d"];
 
@@ -6,6 +8,14 @@ const FIXED_COLOURS: Record<string, string> = {
   Away: "#b8b8bd",
   Untracked: "#8e8e93",
   Uncategorized: "#9aa5b1",
+  // Meeting types get colours of their own, so two can never share one by chance.
+  [meetingCategory(null)]: "#748ffc",
+  [meetingCategory("one-on-one")]: "#1f8a4c",
+  [meetingCategory("dsu")]: "#7b3fe4",
+  [meetingCategory("management")]: "#c2255c",
+  [meetingCategory("architecture")]: "#0c8599",
+  [meetingCategory("customer")]: "#d9480f",
+  [meetingCategory("other")]: "#868e96",
 };
 
 /**

@@ -83,6 +83,16 @@ describe("SegmentRecorder", () => {
     expect(all().map((segment) => segment.kind)).toEqual(["active", "active"]);
   });
 
+  it("should store whether you were on a call, starting a new stretch when a call starts", () => {
+    recorder.record(sample({ app: "Google Chat", bundleId: "com.google.Chrome.app.chat", title: "Chat" }), T0, 0);
+    recorder.record(sample({ app: "Google Chat", bundleId: "com.google.Chrome.app.chat", title: "Chat", onCall: true }), T0 + 3000, 0);
+    recorder.record(sample({ app: "Google Chat", bundleId: "com.google.Chrome.app.chat", title: "Chat", onCall: true }), T0 + 6000, 0);
+    expect(all().map((stretch) => [stretch.startedAt - T0, stretch.endedAt - T0, stretch.onCall])).toEqual([
+      [0, 3000, false],
+      [3000, 6000, true],
+    ]);
+  });
+
   it("should count away time from the end of the call, not from the last input", () => {
     recorder.record(sample(), T0, 0);
     const callEnd = T0 + 10 * 60_000;
@@ -91,7 +101,9 @@ describe("SegmentRecorder", () => {
     }
     const away = all().filter((segment) => segment.kind === "idle");
     expect(away).toHaveLength(1);
-    expect(away[0].startedAt).toBe(callEnd);
+    // The call's own stretch ends at its last on-call sample; away starts with the first sample after it.
+    expect(away[0].startedAt).toBe(callEnd + 3000);
+    expect(all().find((segment) => segment.onCall)?.endedAt).toBe(callEnd + 3000);
   });
 
   it("should extend the away stretch while still away and end it on return", () => {

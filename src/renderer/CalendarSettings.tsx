@@ -22,8 +22,7 @@ const PROVIDER_TEXT = { meet: "Google Meet", zoom: "Zoom", teams: "Teams" } as c
 
 /**
  * Google Calendar and auto-join: sign in, turn automatic joining on or off, see the coming meetings with
- * what will happen to each (skip one, or join it now), and how to add the Chrome extension that clicks
- * Join on Meet and Teams.
+ * what will happen to each (skip one, or join it now).
  */
 export function CalendarSettings() {
   const [status, setStatus] = useState<CalendarStatus | null>(null);
@@ -152,17 +151,9 @@ export function CalendarSettings() {
         </table>
       )}
 
-      <h2>Chrome extension for Meet and Teams</h2>
       <p className="hint">
-        Zoom meetings open straight in the Zoom app. Meet and Teams open in Chrome, where the Time Center Join
-        extension clicks Join for you (only in tabs Time Center opened). To add it once: open{" "}
-        <code>chrome://extensions</code>, turn on Developer mode, click Load unpacked, and pick this folder:
-      </p>
-      <p>
-        <code>{status.extensionPath}</code>{" "}
-        <button className="secondary" onClick={() => void window.timeCenter.showExtensionFolder()}>
-          Show in Finder
-        </button>
+        Zoom meetings open straight in the Zoom app. Meet and Teams open in Chrome on the meeting's page, where
+        you click Join.
       </p>
     </section>
   );
@@ -185,7 +176,7 @@ function formatTime(ms: number): string {
  * @param error What the IPC call threw.
  * @returns The message to show.
  */
-function readableError(error: unknown): string {
+export function readableError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   return text.replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 }

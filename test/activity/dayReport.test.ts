@@ -64,6 +64,28 @@ describe("buildDayReport", () => {
     expect(report.timeline[0].start).toBe(dayStart);
   });
 
+  it("should split meeting time by type and still add every category up to the active total", () => {
+    const nine = dayStart + 9 * 60 * MIN;
+    activity.insertSegment(segment({ startedAt: dayStart - 20 * MIN, endedAt: dayStart + 10 * MIN, app: "Google Chat", onCall: true }));
+    activity.insertSegment(segment({ startedAt: nine, endedAt: nine + 20 * MIN, app: "Zoom" }));
+    activity.insertSegment(segment({ startedAt: nine + 20 * MIN, endedAt: nine + 45 * MIN, app: "WebStorm", project: "time-center" }));
+    const meetings = [
+      { eventId: "late", title: "Late call", start: dayStart - 30 * MIN, end: dayStart + 15 * MIN, response: "accepted", type: "customer" as const, typeSource: "you" as const, joinUrl: null, attendees: [{ email: "a@acme.com", name: null }] },
+      { eventId: "1-1", title: "Ryan / Sam", start: nine, end: nine + 30 * MIN, response: "accepted", type: "one-on-one" as const, typeSource: "haiku" as const, joinUrl: "https://zoom.us/j/1", attendees: [{ email: "sam@qbdvision.com", name: null }] },
+    ];
+    const report = buildDayReport(activity, STARTER_RULES, dayStart + MIN, (from, to) => meetings.filter((m) => m.start < to && m.end > from));
+    expect(report.byCategory).toEqual([
+      { name: "Meetings · One on ones", ms: 30 * MIN },
+      { name: "Coding", ms: 15 * MIN },
+      { name: "Meetings · Customer", ms: 10 * MIN },
+    ]);
+    expect(report.byCategory.reduce((sum, total) => sum + total.ms, 0)).toBe(report.activeMs);
+    expect(report.meetings.map((meeting) => [meeting.eventId, meeting.ms / MIN])).toEqual([
+      ["late", 10],
+      ["1-1", 30],
+    ]);
+  });
+
   it("should apply edited rules to time already recorded", () => {
     activity.insertSegment(segment({ startedAt: dayStart, endedAt: dayStart + MIN, app: "Finder" }));
     const report = buildDayReport(activity, [{ field: "app", pattern: "finder", category: "Admin" }], dayStart);

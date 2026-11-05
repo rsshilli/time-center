@@ -75,8 +75,18 @@ describe("toCalendarEvent", () => {
     hangoutLink: "https://meet.google.com/abc-defg-hij",
   };
 
-  it("should read the title, times, link and your answer", () => {
-    const event = toCalendarEvent({ ...base, attendees: [{ responseStatus: "accepted" }, { self: true, responseStatus: "tentative" }] });
+  it("should read the title, times, link, your answer, the series and the other guests", () => {
+    const event = toCalendarEvent({
+      ...base,
+      recurringEventId: "series1",
+      attendees: [
+        { email: "sam@acme.com", displayName: " Sam Lee ", responseStatus: "accepted" },
+        { email: "kim@qbdvision.com" },
+        { email: "ryan@qbdvision.com", self: true, responseStatus: "tentative" },
+        { email: "room-4@resource.calendar.google.com", resource: true },
+        { email: "lee@qbdvision.com", responseStatus: "declined" },
+      ],
+    });
     expect(event).toEqual({
       eventId: "evt1",
       title: "Standup",
@@ -85,7 +95,16 @@ describe("toCalendarEvent", () => {
       response: "tentative",
       provider: "meet",
       joinUrl: "https://meet.google.com/abc-defg-hij",
+      seriesId: "series1",
+      attendees: [
+        { email: "sam@acme.com", name: "Sam Lee" },
+        { email: "kim@qbdvision.com", name: null },
+      ],
     });
+  });
+
+  it("should use its own id as the series when the meeting doesn't repeat", () => {
+    expect(toCalendarEvent(base)?.seriesId).toBe("evt1");
   });
 
   it("should count an event with no guests as accepted", () => {
@@ -114,9 +133,6 @@ describe("shouldJoin", () => {
 });
 
 describe("joinTarget", () => {
-  /** A stand-in signer that shows which address it signed. */
-  const sign = (url: URL) => `tc-join.signed-for-${url.hostname}`;
-
   const meeting = (provider: CalendarEvent["provider"], joinUrl: string): CalendarEvent => ({
     eventId: "1",
     title: "T",
@@ -125,31 +141,33 @@ describe("joinTarget", () => {
     response: "accepted",
     provider,
     joinUrl,
+    seriesId: "1",
+    attendees: [],
   });
 
   it("should open a Zoom meeting in the Zoom app with its number, password and webinar token", () => {
-    expect(joinTarget(meeting("zoom", "https://us02web.zoom.us/j/8812345678?pwd=Xy12&tk=T9"), null, sign)).toEqual({
+    expect(joinTarget(meeting("zoom", "https://us02web.zoom.us/j/8812345678?pwd=Xy12&tk=T9"), null)).toEqual({
       app: "zoom",
       url: "zoommtg://us02web.zoom.us/join?action=join&confno=8812345678&pwd=Xy12&tk=T9",
     });
   });
 
   it("should open a Zoom personal link in Chrome, since it has no number to hand the app", () => {
-    expect(joinTarget(meeting("zoom", "https://acme.zoom.us/my/ryan"), null, sign)).toEqual({
+    expect(joinTarget(meeting("zoom", "https://acme.zoom.us/my/ryan"), null)).toEqual({
       app: "chrome",
       url: "https://acme.zoom.us/my/ryan",
     });
   });
 
-  it("should open Meet in Chrome as the calendar's account, marked for the extension", () => {
-    expect(joinTarget(meeting("meet", "https://meet.google.com/abc-defg-hij"), "ryan@example.com", sign)).toEqual({
+  it("should open Meet in Chrome as the calendar's account", () => {
+    expect(joinTarget(meeting("meet", "https://meet.google.com/abc-defg-hij"), "ryan@example.com")).toEqual({
       app: "chrome",
-      url: "https://meet.google.com/abc-defg-hij?authuser=ryan%40example.com#tc-join.signed-for-meet.google.com",
+      url: "https://meet.google.com/abc-defg-hij?authuser=ryan%40example.com",
     });
   });
 
-  it("should mark a Teams link for the extension", () => {
-    const target = joinTarget(meeting("teams", "https://teams.microsoft.com/l/meetup-join/abc/0?context=x"), "r@x.com", sign);
-    expect(target.url).toBe("https://teams.microsoft.com/l/meetup-join/abc/0?context=x#tc-join.signed-for-teams.microsoft.com");
+  it("should open a Teams link in Chrome as it is", () => {
+    const target = joinTarget(meeting("teams", "https://teams.microsoft.com/l/meetup-join/abc/0?context=x"), "r@x.com");
+    expect(target).toEqual({ app: "chrome", url: "https://teams.microsoft.com/l/meetup-join/abc/0?context=x" });
   });
 });

@@ -4,6 +4,7 @@ import { colourFor, formatClock, formatDay, formatDuration } from "./format";
 import { MINUTE, SHIFT_STEP, stepMoment, stepToChange } from "./timelineStep";
 import { keepInView, panRange, tickMoments, zoomRange, type TimeRange } from "./timelineZoom";
 import { UNCATEGORIZED } from "./uncategorized";
+import { MeetingTypesCard } from "./MeetingTypesCard";
 import { UncategorizedPanel } from "./UncategorizedPanel";
 
 /** While showing today, the dashboard re-reads the day this often. */
@@ -181,6 +182,7 @@ export function DashboardScreen() {
             <TotalsCard title="Projects" totals={report.byProject} empty="No WebStorm projects" />
             <TotalsCard title="Websites" totals={report.byDomain} empty="No Chrome tabs" />
           </div>
+          {report.meetings.length > 0 && <MeetingTypesCard meetings={report.meetings} onChanged={() => void load()} />}
           {showUncategorized && (
             <UncategorizedPanel
               timeline={report.timeline}

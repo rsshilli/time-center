@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { BackupSettingsInput, BackupStatus } from "../shared/ipc";
 import { CalendarSettings } from "./CalendarSettings";
 import { IgnoredAppsEditor } from "./IgnoredAppsEditor";
+import { MeetingTypeSettings } from "./MeetingTypeSettings";
 import { RulesEditor } from "./RulesEditor";
 
 /**
@@ -75,6 +76,7 @@ export function SettingsScreen() {
   return (
     <section>
       <CalendarSettings />
+      <MeetingTypeSettings />
       <h1>Weekly backup</h1>
       <p className="lead">
         Once a week, Time Center copies its database (your activity, meetings, transcripts and TODOs) to an

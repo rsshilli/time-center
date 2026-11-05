@@ -12,13 +12,11 @@ export interface MeetingJoinerDeps {
   openInChrome(url: string): Promise<void>;
   /** The calendar's Google account, so Meet opens signed in as it. */
   account(): string | null;
-  /** Makes the signed `#tc-join.…` marker for an address, so the extension knows the app opened it. */
-  signMarker(url: URL): string;
 }
 
 /**
  * Opens a meeting: Zoom meetings straight in the Zoom app, Meet and Teams in Chrome (Edge is never used,
- * since it's ignored), where the companion extension clicks Join.
+ * since it's ignored), where you click Join.
  */
 export class MeetingJoiner {
   /** @param deps How to open addresses. */
@@ -29,7 +27,7 @@ export class MeetingJoiner {
    * @param event The meeting; it must have a link.
    */
   async join(event: CalendarEvent): Promise<void> {
-    const target = joinTarget(event, this.deps.account(), (url) => this.deps.signMarker(url));
+    const target = joinTarget(event, this.deps.account());
     if (target.app === "zoom") {
       await this.deps.openExternal(target.url);
       return;

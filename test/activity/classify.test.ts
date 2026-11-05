@@ -32,6 +32,11 @@ describe("categorize", () => {
     expect(categorize(item({ app: "Google Chrome", domain: "meet.google.com" }), STARTER_RULES)).toBe("Meetings");
   });
 
+  it("should put the Zoom app in Meetings under its new name and its old one", () => {
+    expect(categorize(item({ app: "Zoom" }), STARTER_RULES)).toBe("Meetings");
+    expect(categorize(item({ app: "zoom.us" }), STARTER_RULES)).toBe("Meetings");
+  });
+
   it("should fall back to Uncategorized when no rule matches", () => {
     expect(categorize(item({ app: "Finder" }), STARTER_RULES)).toBe(UNCATEGORIZED);
   });

@@ -1,7 +1,6 @@
 node_modules/
 out/
 resources/bin/
-extension/build/
 dist/
 .github/
 .idea/

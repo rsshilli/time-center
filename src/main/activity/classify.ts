@@ -15,7 +15,8 @@ export const STARTER_RULES: readonly CategoryRule[] = [
   { field: "domain", pattern: "github.com", category: "Code review" },
   { field: "app", pattern: "Slack", category: "Communication" },
   { field: "domain", pattern: "mail.google.com", category: "Communication" },
-  { field: "app", pattern: "zoom.us", category: "Meetings" },
+  // The Zoom app calls itself "Zoom" now (us.zoom.xos, seen 2026-11-05); older versions said "zoom.us".
+  { field: "app", pattern: "Zoom", category: "Meetings" },
   { field: "app", pattern: "Microsoft Teams", category: "Meetings" },
   { field: "domain", pattern: "meet.google.com", category: "Meetings" },
   { field: "domain", pattern: "teams.microsoft.com", category: "Meetings" },

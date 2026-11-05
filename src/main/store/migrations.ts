@@ -85,4 +85,24 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE meeting_joins ADD COLUMN join_url TEXT;
   CREATE INDEX meeting_joins_url ON meeting_joins (join_url, decided_at);
   `,
+  `
+  -- Who else was invited (JSON list of {email, name}) and the repeating meeting each occurrence belongs to.
+  ALTER TABLE calendar_events ADD COLUMN attendees TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE calendar_events ADD COLUMN series_id TEXT;
+  UPDATE calendar_events SET series_id = event_id;
+
+  -- Each meeting's type, kept per repeating series so every occurrence shares it. Kept apart from
+  -- calendar_events, which each sync rewrites. source 'you' is a correction Haiku never overwrites.
+  CREATE TABLE meeting_types (
+    series_id  TEXT PRIMARY KEY,
+    type       TEXT NOT NULL,
+    source     TEXT NOT NULL CHECK (source IN ('haiku', 'you')),
+    decided_at TEXT NOT NULL
+  );
+  `,
+  `
+  -- 1 when some app was using the microphone for the whole stretch (a call), so a meeting held in any app
+  -- counts as attended. Stretches recorded before this read as 0.
+  ALTER TABLE activity_segments ADD COLUMN on_call INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
