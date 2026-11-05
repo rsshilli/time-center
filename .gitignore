@@ -10,3 +10,4 @@ spike/**/recordings/
 *.log
 .env
 .agent-errors.jsonl
+.claude/settings.local.json

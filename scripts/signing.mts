@@ -11,6 +11,9 @@
  *
  *   node scripts/signing.ts setup          creates the certificate once (does nothing if it exists)
  *   node scripts/signing.ts sign <app>     signs a built .app with it
+ *
+ * When the login keychain holds an "Apple Development" certificate, `sign` uses that instead (see
+ * findAppleDevelopmentIdentity).
  */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -94,6 +97,41 @@ function setup(): void {
  * @param appPath The .app bundle.
  */
 function sign(appPath: string): void {
+  const identity = findAppleDevelopmentIdentity() ?? localIdentity();
+  // --deep covers nested bundles only, not loose executables in Resources, so sign our helper first.
+  const helper = join(appPath, "Contents/Resources/bin/active-window");
+  if (existsSync(helper)) {
+    execFileSync("codesign", ["--force", "--sign", identity.hash, ...identity.keychainArgs, helper], { stdio: "inherit" });
+  }
+  // --deep signs the Electron frameworks and helper apps inside the bundle with the same identity.
+  execFileSync("codesign", ["--force", "--deep", "--sign", identity.hash, ...identity.keychainArgs, appPath], {
+    stdio: "inherit",
+  });
+  execFileSync("codesign", ["--verify", "--deep", "--strict", appPath], { stdio: "inherit" });
+  console.log(`Signed ${appPath} with "${identity.name}".`);
+}
+
+/**
+ * Finds an "Apple Development" certificate (from signing in to Xcode with an Apple ID) in the login
+ * keychain. It is preferred because it carries a team ID: without one, the keychain trusts only the exact
+ * build that clicked "Always Allow" (its partition list gains a `cdhash:` per build), so every rebuild asked
+ * for the "Time Center Safe Storage" key again. Seen 2026-11-05: six `cdhash:` entries on that item.
+ * @returns The identity, or null when there is none.
+ */
+function findAppleDevelopmentIdentity(): { hash: string; name: string; keychainArgs: string[] } | null {
+  const output = security("find-identity", "-v", "-p", "codesigning");
+  const match = output.match(/\b([0-9A-F]{40})\s+"(Apple Development: [^"]+)"/);
+  if (!match) {
+    return null;
+  }
+  return { hash: match[1], name: match[2], keychainArgs: [] };
+}
+
+/**
+ * Unlocks the local signing keychain and returns its self-signed identity.
+ * @returns The identity.
+ */
+function localIdentity(): { hash: string; name: string; keychainArgs: string[] } {
   if (!existsSync(KEYCHAIN_PATH)) {
     throw new Error("No signing certificate yet. Run `node scripts/signing.ts setup` once.");
   }
@@ -102,17 +140,7 @@ function sign(appPath: string): void {
   if (!hash) {
     throw new Error(`The signing keychain holds no "${CERT_NAME}" identity.`);
   }
-  // --deep covers nested bundles only, not loose executables in Resources, so sign our helper first.
-  const helper = join(appPath, "Contents/Resources/bin/active-window");
-  if (existsSync(helper)) {
-    execFileSync("codesign", ["--force", "--sign", hash, "--keychain", KEYCHAIN_PATH, helper], { stdio: "inherit" });
-  }
-  // --deep signs the Electron frameworks and helper apps inside the bundle with the same identity.
-  execFileSync("codesign", ["--force", "--deep", "--sign", hash, "--keychain", KEYCHAIN_PATH, appPath], {
-    stdio: "inherit",
-  });
-  execFileSync("codesign", ["--verify", "--deep", "--strict", appPath], { stdio: "inherit" });
-  console.log(`Signed ${appPath} with "${CERT_NAME}".`);
+  return { hash, name: CERT_NAME, keychainArgs: ["--keychain", KEYCHAIN_PATH] };
 }
 
 /**
