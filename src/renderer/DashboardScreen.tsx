@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { screenshotUrl, type DayReport, type ScreenshotInfo, type TimelineItem, type Total } from "../shared/ipc";
 import { colourFor, formatClock, formatDay, formatDuration } from "./format";
+import { MINUTE, SHIFT_STEP, stepMoment } from "./timelineStep";
 
 /** While showing today, the dashboard re-reads the day this often. */
 const REFRESH_MS = 30_000;
@@ -64,6 +65,28 @@ export function DashboardScreen() {
     }, REFRESH_MS);
     return () => clearInterval(timer);
   }, [at, load]);
+
+  useEffect(() => {
+    /**
+     * Left and Right step the picked moment a minute earlier or later; with Shift, ten minutes.
+     * @param event The key press.
+     */
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+        return;
+      }
+      if (!report || report.timeline.length === 0 || event.metaKey || event.ctrlKey || event.altKey || isTyping(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      const { from, to } = visibleRange(report);
+      const direction = event.key === "ArrowLeft" ? -1 : 1;
+      const step = event.shiftKey ? SHIFT_STEP : MINUTE;
+      setSelected((current) => stepMoment(current ?? latestShot(report.screenshots) ?? to, direction, step, from, to));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [report]);
 
   /**
    * Moves to the day before or after.
@@ -142,6 +165,18 @@ function startOfDay(ms: number): number {
   const date = new Date(ms);
   date.setHours(0, 0, 0, 0);
   return date.getTime();
+}
+
+/**
+ * Says whether a key press is going into a text box, where arrows must move the text cursor instead.
+ * @param target Where the key press landed.
+ * @returns True for inputs, text areas, drop-downs and editable text.
+ */
+function isTyping(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
 /**
@@ -245,7 +280,7 @@ function Timeline({
 function MomentPanel({ report, selected }: { report: DayReport; selected: number | null }) {
   const [zoomed, setZoomed] = useState<number | null>(null);
   if (selected === null) {
-    return <p className="hint">Click the timeline to see what you were doing at that moment.</p>;
+    return <p className="hint">Click the timeline, or press ← →, to see what you were doing at that moment.</p>;
   }
   const item = report.timeline.find((candidate) => candidate.start <= selected && selected < candidate.end);
   const shots = shotsNear(report.screenshots, selected);

@@ -32,14 +32,23 @@ struct Sample: Encodable {
 /// Chrome's bundle ids (stable, beta, dev, canary) all start with this.
 let chromePrefix = "com.google.Chrome"
 
+/// Installed Chrome web apps (Google Chat, …) are `com.google.Chrome.app.<id>`; they can't answer
+/// "URL of active tab", so asking only costs an Apple event per tick.
+func isChromeBrowser(_ bundleId: String) -> Bool {
+    return bundleId.hasPrefix(chromePrefix) && !bundleId.hasPrefix(chromePrefix + ".app.")
+}
+
 /// Reads the front window on a timer and prints a Sample per tick.
 final class Reporter {
     private let ignored: Set<String>
     private let encoder = JSONEncoder()
-    /// The Chrome tab address is fetched only when the window title or app changes, since a tab
-    /// switch or navigation changes the title. Saves an Apple event every tick while Chrome is in front.
+    /// The Chrome tab address is reused while the window title stays the same, since a tab switch or
+    /// navigation usually changes the title. Saves an Apple event most ticks while Chrome is in front.
     private var lastUrlKey: String?
     private var lastUrl: String?
+    private var lastUrlAt = Date.distantPast
+    /// Re-ask Chrome at least this often, for pages that change address but keep their title.
+    private let urlMaxAge: TimeInterval = 15
 
     /// - Parameter ignored: Bundle ids whose windows must never be read.
     init(ignored: Set<String>) {
@@ -66,8 +75,11 @@ final class Reporter {
         }
         let title = focusedWindowTitle(pid: app.processIdentifier) ?? frontWindowName(pid: app.processIdentifier)
         var url: String? = nil
-        if let bundleId, bundleId.hasPrefix(chromePrefix) {
+        if let bundleId, isChromeBrowser(bundleId) {
             url = chromeUrl(bundleId: bundleId, title: title)
+        } else {
+            // Coming back to Chrome later must ask again, even if the title happens to match.
+            lastUrlKey = nil
         }
         return Sample(app: app.localizedName, bundleId: bundleId, title: title, url: url, ignored: false)
     }
@@ -107,9 +119,10 @@ final class Reporter {
     }
 
     /// The active Chrome tab's address. Needs the Automation permission for Chrome; nil without it.
+    /// Without a title (no Accessibility or Screen Recording) nothing tells tabs apart, so it asks every tick.
     private func chromeUrl(bundleId: String, title: String?) -> String? {
-        let key = bundleId + "\u{1}" + (title ?? "")
-        if key == lastUrlKey {
+        let key = title.map { bundleId + "\u{1}" + $0 }
+        if let key, key == lastUrlKey, Date().timeIntervalSince(lastUrlAt) < urlMaxAge {
             return lastUrl
         }
         let source = """
@@ -125,6 +138,7 @@ final class Reporter {
             return nil
         }
         lastUrlKey = key
+        lastUrlAt = Date()
         lastUrl = result?.stringValue
         return lastUrl
     }
