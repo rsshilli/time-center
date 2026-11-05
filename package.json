@@ -12,8 +12,9 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "package": "electron-vite build && electron-builder --mac --dir",
-    "dist": "electron-vite build && electron-builder --mac",
+    "signing:setup": "node scripts/signing.mts setup",
+    "package": "electron-vite build && electron-builder --mac --dir && node scripts/signing.mts sign \"dist/mac-arm64/Time Center.app\"",
+    "dist": "npm run package && electron-builder --mac dmg --prepackaged \"dist/mac-arm64/Time Center.app\"",
     "spike:audio:electron": "rolldown spike/system-audio/electronLoopback.ts --file out/spike/electronLoopback.cjs --format cjs --platform node --external electron && electron out/spike/electronLoopback.cjs",
     "spike:audio:tap": "swift spike/system-audio/AudioTapProbe.swift \"${TMPDIR}time-center-spike-tone.wav\""
   },
