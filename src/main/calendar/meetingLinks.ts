@@ -83,7 +83,8 @@ export function toCalendarEvent(raw: GoogleEvent): CalendarEvent | null {
 
 /**
  * Finds the event's meeting link: the conference Google attached (Meet, or a Zoom/Teams add-on) first,
- * then a Meet link, then the first Zoom, Teams or Meet address in the location or the description.
+ * then a Meet link, then the first Zoom, Teams or Meet address in the location or the description. When
+ * there is none, the first one hidden behind a mail filter's safe-link wrapper (Mimecast) is used instead.
  * @param raw The event.
  * @returns The link, or null when there is none.
  */
@@ -94,10 +95,13 @@ export function findMeetingLink(raw: GoogleEvent): MeetingLink | null {
   const written = [raw.location ?? "", raw.description ?? ""].flatMap((text) =>
     Array.from(decodeEntities(text).matchAll(URL_PATTERN), (match) => match[0]),
   );
-  for (const candidate of [...conference, raw.hangoutLink ?? "", ...written]) {
-    const link = classifyMeetingUrl(candidate);
-    if (link) {
-      return link;
+  const candidates = [...conference, raw.hangoutLink ?? "", ...written];
+  for (const classify of [classifyMeetingUrl, classifyWrappedMeetingUrl]) {
+    for (const candidate of candidates) {
+      const link = classify(candidate);
+      if (link) {
+        return link;
+      }
     }
   }
   return null;
@@ -109,6 +113,53 @@ export function findMeetingLink(raw: GoogleEvent): MeetingLink | null {
  * @returns The link, cleaned, or null when it isn't a meeting address.
  */
 export function classifyMeetingUrl(candidate: string): MeetingLink | null {
+  const url = parseHttpsUrl(candidate);
+  if (!url) {
+    return null;
+  }
+  const provider = providerForHost(url.hostname);
+  if (provider && MEETING_PATHS[provider].test(url.pathname)) {
+    return { provider, url: url.toString() };
+  }
+  return null;
+}
+
+/** Mimecast's safe-link hosts, which wrap every address in an email or invite and redirect to it on click. */
+const MIMECAST_HOST = /(^|\.)mimecastprotect\.com$|^protect(-[a-z0-9]+)?\.mimecast\.com$/;
+
+/**
+ * Recognises a meeting address wrapped by Mimecast. The wrapper hides the real path and names only the
+ * destination host (`?domain=teams.microsoft.com`), so this trusts the host alone; that is why it is only
+ * tried when the event has no unwrapped meeting link. The wrapped address is kept as it is: opened in
+ * Chrome it redirects to the meeting (checked 2026-11-06: a Teams invite landed on Teams' launcher page).
+ * @param candidate The address, possibly with trailing punctuation from the text around it.
+ * @returns The link, cleaned, or null when it isn't a wrapped meeting address.
+ */
+export function classifyWrappedMeetingUrl(candidate: string): MeetingLink | null {
+  const url = parseHttpsUrl(candidate);
+  if (!url || !MIMECAST_HOST.test(url.hostname.toLowerCase())) {
+    return null;
+  }
+  const provider = providerForHost(url.searchParams.get("domain") ?? "");
+  if (!provider) {
+    return null;
+  }
+  return { provider, url: url.toString() };
+}
+
+/** The paths on each service's host that are meetings, as opposed to its home page or help pages. */
+const MEETING_PATHS: Record<MeetingProvider, RegExp> = {
+  meet: /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}/,
+  zoom: /^\/(j|w|my|s)\//,
+  teams: /^\/(l\/meetup-join|meet)\//,
+};
+
+/**
+ * Parses an address, refusing anything that isn't https.
+ * @param candidate The address, possibly with trailing punctuation from the text around it.
+ * @returns The parsed address, or null.
+ */
+function parseHttpsUrl(candidate: string): URL | null {
   const cleaned = candidate.replace(/[).,;:!?\]]+$/, "");
   let url: URL;
   try {
@@ -120,16 +171,24 @@ export function classifyMeetingUrl(candidate: string): MeetingLink | null {
   if (url.protocol !== "https:") {
     return null;
   }
-  const host = url.hostname.toLowerCase();
-  const path = url.pathname;
-  if (host === "meet.google.com" && /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}/.test(path)) {
-    return { provider: "meet", url: url.toString() };
+  return url;
+}
+
+/**
+ * Says which meeting service a host name belongs to.
+ * @param hostname The host, e.g. `us02web.zoom.us`.
+ * @returns The service, or null.
+ */
+function providerForHost(hostname: string): MeetingProvider | null {
+  const host = hostname.toLowerCase();
+  if (host === "meet.google.com") {
+    return "meet";
   }
-  if (/(^|\.)zoom(gov)?\.(us|com)$/.test(host) && /^\/(j|w|my|s)\//.test(path)) {
-    return { provider: "zoom", url: url.toString() };
+  if (/(^|\.)zoom(gov)?\.(us|com)$/.test(host)) {
+    return "zoom";
   }
-  if (/^teams\.((microsoft|live)\.com|cloud\.microsoft)$/.test(host) && /^\/(l\/meetup-join|meet)\//.test(path)) {
-    return { provider: "teams", url: url.toString() };
+  if (/^teams\.((microsoft|live)\.com|cloud\.microsoft)$/.test(host)) {
+    return "teams";
   }
   return null;
 }
