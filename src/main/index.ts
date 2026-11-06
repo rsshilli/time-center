@@ -35,6 +35,7 @@ import { cleanUpScreenshots } from "./screenshots/cleanUpScreenshots";
 import { captureDisplays, sampleCpuPercent } from "./screenshots/platform";
 import { ScreenCapturer } from "./screenshots/ScreenCapturer";
 import { handleScreenshotScheme, registerScreenshotScheme } from "./screenshots/screenshotProtocol";
+import { enableStartAtLoginOnce } from "./startAtLogin";
 import { SecretStore } from "./store/SecretStore";
 import { Store } from "./store/Store";
 import { TrayController } from "./TrayController";
@@ -63,6 +64,7 @@ async function main(): Promise<void> {
   app.dock?.hide();
 
   const store = new Store(join(app.getPath("userData"), "time-center.db"));
+  enableStartAtLoginOnce(store, app);
   const activity = new ActivityStore(store.db);
   /** The ignored-apps list as saved in Settings, read fresh each time it's needed. */
   const ignoredApps = () => parseIgnoredApps(store.getSetting(IGNORED_APPS_SETTING));
