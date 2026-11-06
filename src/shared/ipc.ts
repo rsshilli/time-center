@@ -65,7 +65,26 @@ export interface TimelineItem {
   project: string | null;
   /** Whether you were on a call (some app using the microphone). Unset reads as no. */
   onCall?: boolean;
+  /** Set when the stretch is Away time you filled in yourself on the timeline. */
+  manual?: { id: number; eventId: string | null };
 }
+
+/** A stretch you marked on the timeline, such as a call taken on your phone. Times are milliseconds since 1970. */
+export interface ManualEntry {
+  id: number;
+  start: number;
+  end: number;
+  /** Where the time goes when it isn't a calendar meeting: "Meetings · Other", "Driving", or your own words. */
+  category: string;
+  /** The calendar meeting it was, whose type then decides the category; null for none. */
+  eventId: string | null;
+}
+
+/** The longest category you can type for a marked stretch. */
+export const MAX_ENTRY_CATEGORY_LENGTH = 60;
+
+/** A new marked stretch: everything but the id. */
+export type NewManualEntry = Omit<ManualEntry, "id">;
 
 /** One minute's screenshot of one display, or a minute skipped because the CPU was busy. */
 export interface ScreenshotInfo {
@@ -115,7 +134,10 @@ export interface DayMeeting {
   type: MeetingType | null;
   /** Who set the type: Claude Haiku's guess, or you. Null while it isn't known. */
   typeSource: "haiku" | "you" | null;
-  /** Whether you were in a call during it; only then does its time count as the meeting's. */
+  /**
+   * Whether you were in a call during it, met in person, or marked a stretch during it as this meeting;
+   * only then does its time count as the meeting's.
+   */
   attended: boolean;
   /** Active time counted toward it. */
   ms: number;
@@ -146,6 +168,8 @@ export interface DayReport {
   byDomain: Total[];
   /** The day's calendar meetings you didn't decline, earliest first. */
   meetings: DayMeeting[];
+  /** Every calendar block you didn't decline, including ones with nobody else invited ("Drive to …"). */
+  allMeetings: DayMeeting[];
 }
 
 /** The meeting services the app can join. */
@@ -231,6 +255,9 @@ export const IPC = {
   setMeetingType: "meetings:set-type",
   getMeetingTypeStatus: "meetings:type-status",
   sortMeetingsNow: "meetings:sort-now",
+  addManualEntry: "activity:add-manual-entry",
+  deleteManualEntry: "activity:delete-manual-entry",
+  copyScreenshot: "screenshots:copy",
 } as const;
 
 /** The API the preload script exposes to the renderer as `window.timeCenter`. */
@@ -279,4 +306,10 @@ export interface TimeCenterApi {
   getMeetingTypeStatus(): Promise<MeetingTypeStatus>;
   /** Sorts any meetings still without a type now, and returns how it went. */
   sortMeetingsNow(): Promise<MeetingTypeStatus>;
+  /** Marks a stretch yourself; it fills the Away time inside it. */
+  addManualEntry(entry: NewManualEntry): Promise<void>;
+  /** Removes a stretch you marked. */
+  deleteManualEntry(id: number): Promise<void>;
+  /** Puts a screenshot on the clipboard at its full, original resolution. */
+  copyScreenshot(id: number): Promise<void>;
 }

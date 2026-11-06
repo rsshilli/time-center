@@ -105,4 +105,17 @@ export const MIGRATIONS: readonly string[] = [
   -- counts as attended. Stretches recorded before this read as 0.
   ALTER TABLE activity_segments ADD COLUMN on_call INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Stretches you marked on the timeline yourself ("On the phone", "Driving"), for time spent away from the
+  -- Mac. They fill only the Away parts of the stretch. event_id: the calendar meeting it was, if any.
+  CREATE TABLE manual_entries (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL,
+    ended_at   TEXT NOT NULL,
+    category   TEXT NOT NULL,
+    event_id   TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX manual_entries_started_at ON manual_entries (started_at);
+  `,
 ];

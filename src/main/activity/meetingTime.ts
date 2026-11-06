@@ -25,15 +25,16 @@ interface Span {
  * Stretches are cut at meeting starts and ends so each piece belongs to one meeting at most.
  * @param timeline The day's stretches, categorized by the rules.
  * @param meetings The day's calendar meetings with their types.
- * @returns The re-categorized timeline, and the meetings worth listing with the time each got.
+ * @returns The re-categorized timeline, the meetings worth listing with the time each got, and every block
+ * you didn't decline (solo ones too) for suggesting when you mark a stretch.
  */
 export function splitMeetingTime(
   timeline: readonly TimelineItem[],
   meetings: readonly MeetingForDay[],
-): { timeline: TimelineItem[]; meetings: DayMeeting[] } {
+): { timeline: TimelineItem[]; meetings: DayMeeting[]; allMeetings: DayMeeting[] } {
   const invited = meetings.filter((meeting) => meeting.response !== "declined");
   const ownCalls = claimCallTime(timeline.filter(isCallTime), invited);
-  const attended = invited.filter((meeting) => ownCalls.has(meeting) || isInPerson(meeting));
+  const attended = invited.filter((meeting) => ownCalls.has(meeting) || isInPerson(meeting) || isLinked(meeting, timeline));
   const msByEvent = new Map<string, number>();
   const pieces = timeline.flatMap((item) => (item.kind === "active" ? cutAtMeetings(item, attended) : [item]));
   const sorted = pieces.map((piece) => {
@@ -50,30 +51,34 @@ export function splitMeetingTime(
     }
     return piece;
   });
+  const all = invited.map((meeting) => ({
+    eventId: meeting.eventId,
+    title: meeting.title,
+    start: meeting.start,
+    end: meeting.end,
+    type: meeting.type,
+    typeSource: meeting.typeSource,
+    attended: attended.includes(meeting),
+    ms: msByEvent.get(meeting.eventId) ?? 0,
+  }));
   return {
     timeline: sorted,
     // Blocks with nobody else invited ("Drive to …") are only listed if you were on a call in them.
-    meetings: invited
-      .filter((meeting) => meeting.attendees.length > 0 || attended.includes(meeting))
-      .map((meeting) => ({
-        eventId: meeting.eventId,
-        title: meeting.title,
-        start: meeting.start,
-        end: meeting.end,
-        type: meeting.type,
-        typeSource: meeting.typeSource,
-        attended: attended.includes(meeting),
-        ms: msByEvent.get(meeting.eventId) ?? 0,
-      })),
+    meetings: all.filter((meeting, i) => invited[i].attendees.length > 0 || meeting.attended),
+    allMeetings: all,
   };
 }
 
 /**
- * Says whether a stretch was spent on a call: the microphone was in use, or the rules put it in Meetings.
+ * Says whether a stretch was spent on a call: the microphone was in use, the rules put it in Meetings, or
+ * you marked it as a calendar meeting yourself.
  * @param item The stretch.
  * @returns True for call time.
  */
 function isCallTime(item: TimelineItem): boolean {
+  if (item.manual) {
+    return item.manual.eventId !== null;
+  }
   return item.kind === "active" && (item.onCall === true || item.category === MEETINGS_CATEGORY);
 }
 
@@ -81,17 +86,19 @@ function isCallTime(item: TimelineItem): boolean {
  * Hands each minute of call time to one meeting: meetings take the call time inside them that no meeting
  * before them took, shortest first (a 1:1 inside an all-day block is the more specific answer), then
  * earliest first. A meeting keeps its share only if it reaches MIN_CALL_MS (or half its length), so a
- * call that overruns into the next slot, or a double-booked slot you skipped, isn't counted.
+ * call that overruns into the next slot, or a double-booked slot you skipped, isn't counted. A stretch you
+ * marked as one meeting is only ever that meeting's.
  * @param calls The day's call stretches.
  * @param meetings The meetings you didn't decline.
  * @returns The call time each attended-by-call meeting owns.
  */
-function claimCallTime(calls: readonly Span[], meetings: readonly MeetingForDay[]): Map<MeetingForDay, Span[]> {
+function claimCallTime(calls: readonly TimelineItem[], meetings: readonly MeetingForDay[]): Map<MeetingForDay, Span[]> {
   const owned = new Map<MeetingForDay, Span[]>();
   let claimed: Span[] = [];
   const order = [...meetings].sort((a, b) => a.end - a.start - (b.end - b.start) || a.start - b.start);
   for (const meeting of order) {
     const inside = calls
+      .filter((call) => !call.manual || call.manual.eventId === meeting.eventId)
       .map((call) => ({ start: Math.max(call.start, meeting.start), end: Math.min(call.end, meeting.end) }))
       .filter((span) => span.end > span.start);
     const own = subtract(inside, claimed);
@@ -114,6 +121,19 @@ function isInPerson(meeting: MeetingForDay): boolean {
 }
 
 /**
+ * Says whether you marked a stretch during a meeting as that meeting yourself. Only filled time inside the
+ * meeting counts, so linking a stretch that runs past it doesn't hand it your recorded time at the Mac.
+ * @param meeting The meeting.
+ * @param timeline The day's stretches.
+ * @returns True when one of your stretches for it overlaps it.
+ */
+function isLinked(meeting: MeetingForDay, timeline: readonly TimelineItem[]): boolean {
+  return timeline.some(
+    (item) => item.manual?.eventId === meeting.eventId && item.start < meeting.end && meeting.start < item.end,
+  );
+}
+
+/**
  * Cuts a stretch wherever a meeting starts or ends inside it.
  * @param item The stretch.
  * @param meetings The attended meetings.
@@ -130,6 +150,7 @@ function cutAtMeetings(item: TimelineItem, meetings: readonly MeetingForDay[]): 
 /**
  * Picks the meeting a piece of time belongs to. Of the attended meetings covering it, one whose own call
  * time includes the piece wins; otherwise the one that started last, since you most likely moved on to it.
+ * A piece you marked yourself belongs to the meeting you picked for it, or to none.
  * @param piece The piece, which no meeting starts or ends inside.
  * @param meetings The attended meetings.
  * @param ownCalls The call time each meeting owns.
@@ -141,6 +162,9 @@ function meetingAt(
   ownCalls: ReadonlyMap<MeetingForDay, Span[]>,
 ): MeetingForDay | null {
   const covering = meetings.filter((meeting) => meeting.start <= piece.start && meeting.end >= piece.end);
+  if (piece.manual) {
+    return covering.find((meeting) => meeting.eventId === piece.manual?.eventId) ?? null;
+  }
   const onItsCall = covering.find((meeting) =>
     (ownCalls.get(meeting) ?? []).some((span) => span.start < piece.end && piece.start < span.end),
   );

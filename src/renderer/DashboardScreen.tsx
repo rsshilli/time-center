@@ -4,7 +4,10 @@ import { colourFor, formatClock, formatDay, formatDuration } from "./format";
 import { MINUTE, SHIFT_STEP, stepMoment, stepToChange } from "./timelineStep";
 import { keepInView, panRange, tickMoments, zoomRange, type TimeRange } from "./timelineZoom";
 import { UNCATEGORIZED } from "./uncategorized";
+import { AddEntryPanel } from "./AddEntryPanel";
+import { snapRange } from "./manualEntry";
 import { MeetingTypesCard } from "./MeetingTypesCard";
+import { ShotLightbox } from "./ShotLightbox";
 import { UncategorizedPanel } from "./UncategorizedPanel";
 
 /** While showing today, the dashboard re-reads the day this often. */
@@ -22,6 +25,9 @@ const HOUR = 3_600_000;
 /** How many thumbnails the strip under the timeline shows, one per equal slice of the visible hours. */
 const STRIP_SLOTS = 10;
 
+/** How far the pointer must move with the button down before a click on the timeline becomes a drag. */
+const DRAG_THRESHOLD_PX = 4;
+
 /**
  * One day of your time: how long you worked, were away, or were in an ignored app; a timeline coloured
  * by category that you click to see that moment's screenshots and window; and totals by category, app,
@@ -36,6 +42,8 @@ export function DashboardScreen() {
   const [error, setError] = useState<string | null>(null);
   /** Whether the list of uncategorized time, opened from the Categories card, is showing. */
   const [showUncategorized, setShowUncategorized] = useState(false);
+  /** The stretch dragged out on the timeline to add an entry for, or null. */
+  const [adding, setAdding] = useState<TimeRange | null>(null);
   /** Counts requests, so a slow answer for a day you already left can't replace a newer one. */
   const latestRequest = useRef(0);
   const today = startOfDay(Date.now());
@@ -68,6 +76,7 @@ export function DashboardScreen() {
         setAt(Date.now());
         setSelected(null);
         setZoom(null);
+        setAdding(null);
         return;
       }
       void load();
@@ -79,10 +88,14 @@ export function DashboardScreen() {
     /**
      * Left and Right move the picked moment to the previous or next change of app or activity; with Shift,
      * ten minutes; with Ctrl, one minute. Option does the same as Ctrl, since macOS keeps Ctrl + arrow for
-     * switching desktops when that shortcut is on.
+     * switching desktops when that shortcut is on. Escape closes the panel for marking a stretch.
      * @param event The key press.
      */
     const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setAdding(null);
+        return;
+      }
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
         return;
       }
@@ -119,6 +132,7 @@ export function DashboardScreen() {
     setAt(direction === -1 ? report.dayStart - HOUR : report.dayEnd + HOUR);
     setSelected(null);
     setZoom(null);
+    setAdding(null);
   };
 
   if (!report) {
@@ -143,6 +157,7 @@ export function DashboardScreen() {
               setAt(Date.now());
               setSelected(null);
               setZoom(null);
+              setAdding(null);
             }}
           >
             Today
@@ -164,8 +179,23 @@ export function DashboardScreen() {
         </p>
       ) : (
         <>
-          <Timeline report={report} selected={selected} onSelect={setSelected} zoom={zoom} onZoom={setZoom} />
-          <MomentPanel report={report} selected={selected ?? latestShot(report.screenshots) ?? null} />
+          <Timeline
+            report={report}
+            selected={selected}
+            onSelect={setSelected}
+            zoom={zoom}
+            onZoom={setZoom}
+            marked={adding}
+            onMark={setAdding}
+          />
+          {adding && (
+            <AddEntryPanel range={adding} report={report} onClose={() => setAdding(null)} onSaved={() => void load()} />
+          )}
+          <MomentPanel
+            report={report}
+            selected={selected ?? latestShot(report.screenshots) ?? null}
+            onChanged={() => void load()}
+          />
           <div className="totals">
             <TotalsCard
               title="Categories"
@@ -237,12 +267,14 @@ function Stat({ label, ms }: { label: string; ms: number }) {
  * The day as a coloured bar, from the first hour with activity to the last, with a tick under it for
  * every moment that has a screenshot and a strip of thumbnails below. Clicking picks a moment. Once one is
  * picked, the scroll wheel zooms in and out around it and a sideways swipe pans; double-click shows the
- * whole day again.
+ * whole day again. Dragging across the bar marks a stretch, to say what you were doing while away.
  * @param props.report The day.
  * @param props.selected The picked moment, if any.
  * @param props.onSelect Called with the moment clicked.
  * @param props.zoom The zoomed-in stretch, or null for the whole day.
  * @param props.onZoom Called with the new stretch, or null for the whole day.
+ * @param props.marked The stretch being added, shaded on the bar, or null.
+ * @param props.onMark Called with a stretch dragged out on the bar.
  */
 function Timeline({
   report,
@@ -250,17 +282,30 @@ function Timeline({
   onSelect,
   zoom,
   onZoom,
+  marked,
+  onMark,
 }: {
   report: DayReport;
   selected: number | null;
   onSelect: (moment: number) => void;
   zoom: TimeRange | null;
   onZoom: (range: TimeRange | null) => void;
+  marked: TimeRange | null;
+  onMark: (range: TimeRange) => void;
 }) {
   const full = visibleRange(report);
   const { from, to } = zoom ?? full;
   const span = to - from;
   const bar = useRef<HTMLDivElement>(null);
+  /** The stretch under a drag in progress. */
+  const [dragging, setDragging] = useState<TimeRange | null>(null);
+  /** Set when a drag ends, so the click that follows the release doesn't also pick a moment. */
+  const dragged = useRef(false);
+  /** Ends the drag in progress, or null when there is none. */
+  const endDrag = useRef<(() => void) | null>(null);
+
+  // A drag still going when the timeline goes away (the day changed) is dropped, not marked.
+  useEffect(() => () => endDrag.current?.(), []);
   /**
    * Places a moment along the bar.
    * @param ms The moment.
@@ -292,6 +337,10 @@ function Timeline({
      */
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
+      if (endDrag.current) {
+        // Zooming mid-drag would move the bar under the stretch being dragged.
+        return;
+      }
       const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 33 : 1;
       const box = element.getBoundingClientRect();
       const view = { from, to };
@@ -309,13 +358,85 @@ function Timeline({
   }, [selected, from, to, span, full.from, full.to, onZoom]);
 
   /**
-   * Turns a click on the bar into a moment.
+   * Turns a click on the bar into a moment. A click that ends a drag picks nothing.
    * @param event The click.
    */
   const pick = (event: MouseEvent<HTMLDivElement>) => {
+    if (dragged.current) {
+      dragged.current = false;
+      return;
+    }
     const box = event.currentTarget.getBoundingClientRect();
     onSelect(from + ((event.clientX - box.left) / box.width) * span);
   };
+
+  /**
+   * Starts dragging out a stretch to mark. Moving and letting go are followed on the whole window, so the
+   * drag keeps going when the pointer leaves the bar.
+   * @param event The mouse press.
+   */
+  const startDrag = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+    // Stops the press selecting text across the page while dragging.
+    event.preventDefault();
+    dragged.current = false;
+    const box = event.currentTarget.getBoundingClientRect();
+    /**
+     * Turns a spot on the bar into a moment, at the scale the bar had when the drag began.
+     * @param x The pointer's distance from the window's left edge.
+     * @returns The moment.
+     */
+    const momentAt = (x: number) => from + ((x - box.left) / box.width) * span;
+    const startX = event.clientX;
+    const anchor = momentAt(startX);
+    let range: TimeRange | null = null;
+    /**
+     * Stretches the drag to the pointer once it has moved far enough to be a drag rather than a click.
+     * @param move The pointer moving with the button held.
+     */
+    const onMove = (move: globalThis.MouseEvent) => {
+      if (range === null && Math.abs(move.clientX - startX) < DRAG_THRESHOLD_PX) {
+        return;
+      }
+      // Not past now: a stretch in the future would be a guess, not a record.
+      range = snapRange(anchor, momentAt(move.clientX), { from, to: Math.min(to, Date.now()) });
+      setDragging(range);
+    };
+    /** Ends the drag and hands on the stretch, if it's at least a minute long. */
+    const onUp = () => {
+      stopDrag();
+      if (range !== null) {
+        dragged.current = true;
+        if (range.to > range.from) {
+          onMark(range);
+        }
+      }
+    };
+    /**
+     * Escape drops the drag without marking anything.
+     * @param key The key press.
+     */
+    const onKey = (key: KeyboardEvent) => {
+      if (key.key === "Escape") {
+        stopDrag();
+      }
+    };
+    /** Stops following the pointer and clears the shaded stretch. */
+    const stopDrag = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("keydown", onKey);
+      endDrag.current = null;
+      setDragging(null);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("keydown", onKey);
+    endDrag.current = stopDrag;
+  };
+  const shown = dragging ?? marked;
 
   return (
     <div className="timeline">
@@ -328,16 +449,26 @@ function Timeline({
             <button className="link" onClick={() => onZoom(null)}>
               Show whole day
             </button>
+            <span>· Drag across grey time to add a phone call or drive</span>
           </>
         ) : (
-          selected !== null && <span>Scroll on the timeline to zoom in</span>
+          <span>
+            {selected !== null && "Scroll on the timeline to zoom in · "}Drag across grey time to add a phone call or drive
+          </span>
         )}
       </div>
-      <div className="timeline-bar" ref={bar} onClick={pick} onDoubleClick={() => onZoom(null)} role="presentation">
+      <div
+        className="timeline-bar"
+        ref={bar}
+        onMouseDown={startDrag}
+        onClick={pick}
+        onDoubleClick={() => onZoom(null)}
+        role="presentation"
+      >
         {report.timeline.map((item, index) => (
           <div
             key={index}
-            className={`timeline-item ${item.kind}`}
+            className={`timeline-item ${item.kind}${item.manual ? " manual" : ""}`}
             style={{
               left: percent(item.start),
               width: percent(from + (item.end - item.start)),
@@ -346,6 +477,9 @@ function Timeline({
             title={describeItem(item)}
           />
         ))}
+        {shown && (
+          <div className="timeline-draft" style={{ left: percent(shown.from), width: percent(from + (shown.to - shown.from)) }} />
+        )}
         {selected !== null && <div className="timeline-cursor" style={{ left: percent(selected) }} />}
       </div>
       <div className="timeline-shots">
@@ -368,12 +502,23 @@ function Timeline({
 }
 
 /**
- * What was going on at the picked moment: the window in front and the nearest screenshots.
+ * What was going on at the picked moment: the window in front and the nearest screenshots. On a stretch
+ * you added yourself, a Remove button takes it off again.
  * @param props.report The day.
  * @param props.selected The moment, or null when nothing is picked and there are no screenshots.
+ * @param props.onChanged Called after an added stretch is removed, to re-read the day.
  */
-function MomentPanel({ report, selected }: { report: DayReport; selected: number | null }) {
+function MomentPanel({
+  report,
+  selected,
+  onChanged,
+}: {
+  report: DayReport;
+  selected: number | null;
+  onChanged: () => void;
+}) {
   const [zoomed, setZoomed] = useState<number | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   if (selected === null) {
     return <p className="hint">Click the timeline, or press ← → to jump between apps, to see what you were doing at that moment.</p>;
   }
@@ -388,7 +533,29 @@ function MomentPanel({ report, selected }: { report: DayReport; selected: number
             <span className="moment-category" style={{ color: colourFor(item.category) }}>
               {item.category}
             </span>
-            <span>{item.kind === "active" ? [item.app, item.title].filter(Boolean).join(" — ") : ""}</span>
+            {item.manual ? (
+              <>
+                <span className="muted">Added by you{item.manual.eventId ? ` · ${meetingTitle(report, item.manual.eventId)}` : ""}</span>
+                <button
+                  className="link"
+                  onClick={() => {
+                    const id = item.manual?.id;
+                    if (id !== undefined) {
+                      setRemoveError(null);
+                      window.timeCenter
+                        .deleteManualEntry(id)
+                        .then(onChanged)
+                        .catch((error: unknown) => setRemoveError(`Couldn't remove it: ${String(error)}`));
+                    }
+                  }}
+                >
+                  Remove
+                </button>
+                {removeError && <span className="error">{removeError}</span>}
+              </>
+            ) : (
+              <span>{item.kind === "active" ? [item.app, item.title].filter(Boolean).join(" — ") : ""}</span>
+            )}
             {item.url && <span className="muted">{item.url}</span>}
           </>
         ) : (
@@ -406,13 +573,19 @@ function MomentPanel({ report, selected }: { report: DayReport; selected: number
       ) : (
         <p className="muted">No screenshot within 45 seconds of this moment.</p>
       )}
-      {zoomed !== null && (
-        <div className="lightbox" onClick={() => setZoomed(null)} role="presentation">
-          <img src={screenshotUrl(zoomed, "full")} alt="Full-size screenshot" />
-        </div>
-      )}
+      {zoomed !== null && <ShotLightbox id={zoomed} onClose={() => setZoomed(null)} />}
     </div>
   );
+}
+
+/**
+ * Names the calendar meeting an added stretch belongs to.
+ * @param report The day.
+ * @param eventId The meeting's id.
+ * @returns Its title, or a stand-in when it's no longer on the calendar.
+ */
+function meetingTitle(report: DayReport, eventId: string): string {
+  return report.allMeetings.find((meeting) => meeting.eventId === eventId)?.title ?? "a meeting no longer on your calendar";
 }
 
 /**
@@ -485,12 +658,16 @@ function TotalsCard({
 }
 
 /**
- * Picks the hours the timeline shows: whole hours around the recorded activity.
+ * Picks the hours the timeline shows: whole hours around the recorded activity, reaching back to the
+ * day's first calendar block so a call or drive before the Mac woke up can still be dragged out.
  * @param report The day.
  * @returns The first and last moment shown.
  */
 function visibleRange(report: DayReport): { from: number; to: number } {
-  const first = report.timeline[0]?.start ?? report.dayStart;
+  const first = Math.min(
+    report.timeline[0]?.start ?? report.dayStart,
+    ...report.allMeetings.filter((meeting) => meeting.start < Date.now()).map((meeting) => meeting.start),
+  );
   const last = Math.max(...report.timeline.map((item) => item.end), first + HOUR);
   const from = Math.max(report.dayStart, report.dayStart + Math.floor((first - report.dayStart) / HOUR) * HOUR);
   const to = Math.min(report.dayEnd, report.dayStart + Math.ceil((last - report.dayStart) / HOUR) * HOUR);

@@ -1,9 +1,10 @@
-import { ipcMain } from "electron";
+import { ClipboardItem, clipboard, ipcMain, nativeImage } from "electron";
 import { IPC, type BackupSettingsInput, type BackupStatus, type PermissionKind } from "../shared/ipc";
 import type { ActivityStore } from "./activity/ActivityStore";
 import { assertRules, parseRules } from "./activity/classify";
 import { buildDayReport } from "./activity/dayReport";
 import { IGNORED_APPS_SETTING, assertIgnoredApps, parseIgnoredApps } from "./activity/ignoredApps";
+import { assertNewManualEntry } from "./activity/manualEntries";
 import type { BackupScheduler } from "./backup/BackupScheduler";
 import type { BackupService } from "./backup/BackupService";
 import type { CalendarStore } from "./calendar/CalendarStore";
@@ -43,6 +44,22 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       deps.calendar.listTypedEvents(from, to),
     ),
   );
+  ipcMain.handle(IPC.addManualEntry, (_event, entry: unknown) => {
+    deps.activity.insertManualEntry(assertNewManualEntry(entry));
+  });
+  ipcMain.handle(IPC.deleteManualEntry, (_event, id: unknown) => {
+    deps.activity.deleteManualEntry(assertRowId(id));
+  });
+  ipcMain.handle(IPC.copyScreenshot, async (_event, id: unknown) => {
+    const path = deps.activity.getScreenshot(assertRowId(id))?.path;
+    const image = path ? nativeImage.createFromPath(path) : null;
+    if (!image || image.isEmpty()) {
+      throw new Error("That screenshot is no longer on this Mac.");
+    }
+    // PNG, not the stored JPEG: lossless, and every app on the Mac pastes it.
+    const png = new Blob([new Uint8Array(image.toPNG())], { type: "image/png" });
+    await clipboard.write([new ClipboardItem({ "image/png": png })]);
+  });
   ipcMain.handle(IPC.getRules, () => parseRules(deps.store.getSetting(RULES_SETTING)));
   ipcMain.handle(IPC.saveRules, (_event, rules: unknown) => {
     const checked = assertRules(rules);
@@ -86,6 +103,18 @@ export function assertMoment(at: unknown): number {
     throw new Error(`Not a moment in time: ${String(at)}`);
   }
   return at;
+}
+
+/**
+ * Checks that a value from the renderer is a database row id, such as a marked stretch's or a screenshot's.
+ * @param id The value.
+ * @returns It, typed.
+ */
+export function assertRowId(id: unknown): number {
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1) {
+    throw new Error(`Not an id: ${String(id)}`);
+  }
+  return id;
 }
 
 /**

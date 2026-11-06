@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { SegmentKind } from "../../shared/ipc";
+import type { ManualEntry, NewManualEntry, SegmentKind } from "../../shared/ipc";
 
 /** A stretch of time with the same front window, as stored. Times are milliseconds since 1970. */
 export interface StoredSegment {
@@ -170,6 +170,45 @@ export class ActivityStore {
   deleteScreenshotsBefore(before: number): number {
     const result = this.db.prepare("DELETE FROM screenshots WHERE taken_at < ?").run(iso(before));
     return Number(result.changes);
+  }
+
+  /**
+   * Stores a stretch you marked on the timeline yourself.
+   * @param entry The stretch.
+   * @returns Its id.
+   */
+  insertManualEntry(entry: NewManualEntry): number {
+    const result = this.db
+      .prepare("INSERT INTO manual_entries (started_at, ended_at, category, event_id, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(iso(entry.start), iso(entry.end), entry.category, entry.eventId, iso(Date.now()));
+    return Number(result.lastInsertRowid);
+  }
+
+  /**
+   * Lists the stretches you marked that overlap a time range, oldest entry first.
+   * @param from Range start.
+   * @param to Range end (exclusive).
+   * @returns The entries, not clipped to the range.
+   */
+  listManualEntries(from: number, to: number): ManualEntry[] {
+    const rows = this.db
+      .prepare("SELECT * FROM manual_entries WHERE started_at < ? AND ended_at > ? ORDER BY id")
+      .all(iso(to), iso(from)) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: Number(row.id),
+      start: Date.parse(String(row.started_at)),
+      end: Date.parse(String(row.ended_at)),
+      category: String(row.category),
+      eventId: textOrNull(row.event_id),
+    }));
+  }
+
+  /**
+   * Deletes a stretch you marked.
+   * @param id Its id.
+   */
+  deleteManualEntry(id: number): void {
+    this.db.prepare("DELETE FROM manual_entries WHERE id = ?").run(id);
   }
 }
 

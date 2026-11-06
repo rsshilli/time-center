@@ -1,4 +1,14 @@
-import { assertBackupSettingsInput, assertMoment, assertPermissionKind } from "../src/main/ipcHandlers";
+import { assertBackupSettingsInput, assertMoment, assertPermissionKind, assertRowId } from "../src/main/ipcHandlers";
+
+describe("assertRowId", () => {
+  it("should accept a positive whole number and reject anything else from the renderer", () => {
+    expect(assertRowId(42)).toBe(42);
+    expect(() => assertRowId(0)).toThrow(/Not an id/);
+    expect(() => assertRowId(1.5)).toThrow(/Not an id/);
+    expect(() => assertRowId("42")).toThrow(/Not an id/);
+    expect(() => assertRowId(undefined)).toThrow(/Not an id/);
+  });
+});
 
 describe("assertMoment", () => {
   it("should accept a time in milliseconds and reject anything else from the renderer", () => {

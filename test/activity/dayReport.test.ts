@@ -86,6 +86,60 @@ describe("buildDayReport", () => {
     ]);
   });
 
+  it("should count a stretch you marked as a phone call toward its meeting, filling only the Away time", () => {
+    const ten = dayStart + 10 * 60 * MIN;
+    activity.insertSegment(segment({ startedAt: ten, endedAt: ten + 10 * MIN, app: "WebStorm" }));
+    activity.insertSegment(segment({ startedAt: ten + 10 * MIN, endedAt: ten + 60 * MIN, kind: "idle" }));
+    activity.insertManualEntry({ start: ten, end: ten + 40 * MIN, category: "Meetings · Other", eventId: "ws4" });
+    const meetings = [
+      { eventId: "ws4", title: "WS4", start: ten, end: ten + 60 * MIN, response: "accepted", type: "customer" as const, typeSource: "haiku" as const, joinUrl: "https://teams.microsoft.com/l/meetup-join/x", attendees: [{ email: "a@lilly.com", name: null }] },
+    ];
+    const report = buildDayReport(activity, STARTER_RULES, ten, (from, to) => meetings.filter((m) => m.start < to && m.end > from));
+    expect(report.byCategory).toEqual([{ name: "Meetings · Customer", ms: 40 * MIN }]);
+    expect(report.idleMs).toBe(20 * MIN);
+    expect(report.meetings).toEqual([expect.objectContaining({ eventId: "ws4", attended: true, ms: 40 * MIN })]);
+  });
+
+  it("should not hand a meeting your time at the Mac when the stretch you linked to it only fills time after it", () => {
+    const ten = dayStart + 10 * 60 * MIN;
+    activity.insertSegment(segment({ startedAt: ten, endedAt: ten + 60 * MIN, app: "WebStorm" }));
+    activity.insertSegment(segment({ startedAt: ten + 60 * MIN, endedAt: ten + 90 * MIN, kind: "idle" }));
+    activity.insertManualEntry({ start: ten + 30 * MIN, end: ten + 90 * MIN, category: "Meetings · Other", eventId: "ws4" });
+    const meetings = [
+      { eventId: "ws4", title: "WS4", start: ten, end: ten + 60 * MIN, response: "accepted", type: "customer" as const, typeSource: "haiku" as const, joinUrl: "https://teams.microsoft.com/l/meetup-join/x", attendees: [{ email: "a@lilly.com", name: null }] },
+    ];
+    const report = buildDayReport(activity, STARTER_RULES, ten, (from, to) => meetings.filter((m) => m.start < to && m.end > from));
+    expect(report.byCategory.find((total) => total.name === "Meetings · Customer")).toBeUndefined();
+    expect(report.byCategory).toContainEqual({ name: "Meetings · Other", ms: 30 * MIN });
+    expect(report.meetings).toEqual([expect.objectContaining({ eventId: "ws4", attended: false, ms: 0 })]);
+  });
+
+  it("should stop filling a stretch once you remove it", () => {
+    const ten = dayStart + 10 * 60 * MIN;
+    activity.insertSegment(segment({ startedAt: ten, endedAt: ten + 30 * MIN, kind: "idle" }));
+    const id = activity.insertManualEntry({ start: ten, end: ten + 30 * MIN, category: "Driving", eventId: null });
+    expect(buildDayReport(activity, STARTER_RULES, ten).byCategory).toEqual([{ name: "Driving", ms: 30 * MIN }]);
+    activity.deleteManualEntry(id);
+    expect(activity.listManualEntries(dayStart, dayEnd)).toEqual([]);
+    expect(buildDayReport(activity, STARTER_RULES, ten).idleMs).toBe(30 * MIN);
+  });
+
+  it("should keep the category you picked for a stretch with no meeting, even inside a meeting you attended", () => {
+    const ten = dayStart + 10 * 60 * MIN;
+    activity.insertSegment(segment({ startedAt: ten, endedAt: ten + 30 * MIN, app: "Zoom" }));
+    activity.insertSegment(segment({ startedAt: ten + 30 * MIN, endedAt: ten + 60 * MIN, kind: "idle" }));
+    activity.insertManualEntry({ start: ten + 30 * MIN, end: ten + 60 * MIN, category: "Driving", eventId: null });
+    const meetings = [
+      { eventId: "1-1", title: "1-1", start: ten, end: ten + 60 * MIN, response: "accepted", type: "one-on-one" as const, typeSource: "haiku" as const, joinUrl: "https://zoom.us/j/1", attendees: [{ email: "s@qbdvision.com", name: null }] },
+    ];
+    const report = buildDayReport(activity, STARTER_RULES, ten, (from, to) => meetings.filter((m) => m.start < to && m.end > from));
+    expect(report.byCategory).toEqual([
+      { name: "Meetings · One on ones", ms: 30 * MIN },
+      { name: "Driving", ms: 30 * MIN },
+    ]);
+    expect(report.timeline.find((item) => item.category === "Driving")?.manual).toEqual({ id: 1, eventId: null });
+  });
+
   it("should apply edited rules to time already recorded", () => {
     activity.insertSegment(segment({ startedAt: dayStart, endedAt: dayStart + MIN, app: "Finder" }));
     const report = buildDayReport(activity, [{ field: "app", pattern: "finder", category: "Admin" }], dayStart);

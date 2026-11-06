@@ -1,11 +1,13 @@
 import type { CategoryRule, DayReport, TimelineItem, Total } from "../../shared/ipc";
 import type { ActivityStore } from "./ActivityStore";
 import { AWAY, UNTRACKED, categorize } from "./classify";
+import { fillAwayGaps } from "./manualEntries";
 import { splitMeetingTime, type MeetingForDay } from "./meetingTime";
 
 /**
  * Builds everything the dashboard shows for the local day containing a moment. Categories are worked
- * out here, on read, so edited rules apply to past days too.
+ * out here, on read, so edited rules apply to past days too. Stretches you marked yourself fill the Away
+ * time they cover before meetings are split out, so a call taken on your phone counts toward its meeting.
  * @param store The activity tables.
  * @param rules The category rules.
  * @param at Any moment in the day.
@@ -13,7 +15,7 @@ import { splitMeetingTime, type MeetingForDay } from "./meetingTime";
  * @returns The day's report.
  */
 export function buildDayReport(
-  store: Pick<ActivityStore, "listSegments" | "listScreenshots">,
+  store: Pick<ActivityStore, "listSegments" | "listScreenshots" | "listManualEntries">,
   rules: readonly CategoryRule[],
   at: number,
   listMeetings: (from: number, to: number) => readonly MeetingForDay[] = () => [],
@@ -34,7 +36,10 @@ export function buildDayReport(
       onCall: segment.onCall === true,
     }))
     .filter((item) => item.end > item.start);
-  const { timeline, meetings } = splitMeetingTime(ruled, listMeetings(dayStart, dayEnd));
+  const entries = store
+    .listManualEntries(dayStart, dayEnd)
+    .map((entry) => ({ ...entry, start: Math.max(entry.start, dayStart), end: Math.min(entry.end, dayEnd) }));
+  const { timeline, meetings, allMeetings } = splitMeetingTime(fillAwayGaps(ruled, entries), listMeetings(dayStart, dayEnd));
   const active = timeline.filter((item) => item.kind === "active");
   return {
     dayStart,
@@ -54,6 +59,7 @@ export function buildDayReport(
     byProject: totalBy(active, (item) => item.project),
     byDomain: totalBy(active, (item) => item.domain),
     meetings,
+    allMeetings,
   };
 }
 

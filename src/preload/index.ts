@@ -28,6 +28,9 @@ const api: TimeCenterApi = {
   setMeetingType: (eventId, type) => ipcRenderer.invoke(IPC.setMeetingType, eventId, type),
   getMeetingTypeStatus: () => ipcRenderer.invoke(IPC.getMeetingTypeStatus),
   sortMeetingsNow: () => ipcRenderer.invoke(IPC.sortMeetingsNow),
+  addManualEntry: (entry) => ipcRenderer.invoke(IPC.addManualEntry, entry),
+  deleteManualEntry: (id) => ipcRenderer.invoke(IPC.deleteManualEntry, id),
+  copyScreenshot: (id) => ipcRenderer.invoke(IPC.copyScreenshot, id),
 };
 
 contextBridge.exposeInMainWorld("timeCenter", api);
