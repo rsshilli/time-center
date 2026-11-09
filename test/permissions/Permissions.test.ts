@@ -43,6 +43,50 @@ describe("Permissions", () => {
     expect(statuses.find((s) => s.kind === "automation")?.state).toBe("granted");
   });
 
+  it("should read Chrome's saved answer without asking, so a restart doesn't show it as not checked", async () => {
+    let probes = 0;
+    const { platform } = fakePlatform({
+      runAppleScript: async () => {
+        probes++;
+        return "1";
+      },
+    });
+    const permissions = new Permissions(platform);
+    expect(permissions.getAll().find((s) => s.kind === "automation")?.state).toBe("unknown");
+
+    await permissions.refreshAutomation();
+
+    expect(permissions.getAll().find((s) => s.kind === "automation")?.state).toBe("granted");
+    expect(probes).toBe(0);
+  });
+
+  it("should remember Chrome's last answer and keep it while Chrome is closed", async () => {
+    const saved: string[] = [];
+    const memory = { load: () => saved.at(-1) ?? null, save: (state: string) => void saved.push(state) };
+    let answer = "denied";
+    const { platform } = fakePlatform({ readChromeAutomation: async () => answer });
+
+    await new Permissions(platform, memory).refreshAutomation();
+    answer = "not-running";
+    const restarted = new Permissions(platform, memory);
+    await restarted.refreshAutomation();
+
+    expect(saved).toEqual(["denied"]);
+    expect(restarted.getAll().find((s) => s.kind === "automation")?.state).toBe("denied");
+    expect(restarted.needsAttention()).toBe(true);
+  });
+
+  it("should keep the last answer when the helper fails or says something new", async () => {
+    const memory = { load: () => "granted", save: () => undefined };
+    const failing = new Permissions(fakePlatform({ readChromeAutomation: async () => Promise.reject(new Error("no helper")) }).platform, memory);
+    const odd = new Permissions(fakePlatform({ readChromeAutomation: async () => "unknown -50" }).platform, memory);
+    await failing.refreshAutomation();
+    await odd.refreshAutomation();
+    expect(failing.getAll().find((s) => s.kind === "automation")?.state).toBe("granted");
+    expect(odd.getAll().find((s) => s.kind === "automation")?.state).toBe("granted");
+    expect(new Permissions(fakePlatform().platform, { load: () => "junk", save: () => undefined }).getAll().at(-1)?.state).toBe("unknown");
+  });
+
   it("should try a screen capture on the first Screen Recording ask, then open its settings pane", async () => {
     let captures = 0;
     const { platform, opened } = fakePlatform({
@@ -88,6 +132,7 @@ function fakePlatform(overrides: Partial<PermissionsPlatform> = {}): { platform:
       opened.push(url);
     },
     runAppleScript: async () => "1",
+    readChromeAutomation: async () => "granted\n",
     ...overrides,
   };
   return { platform, opened };

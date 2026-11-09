@@ -18,7 +18,21 @@ export interface PermissionsPlatform {
   openExternal(url: string): Promise<void>;
   /** Runs an AppleScript and returns what it printed. */
   runAppleScript(script: string): Promise<string>;
+  /**
+   * macOS's saved answer for controlling Chrome, read without ever prompting: "granted", "denied",
+   * "not-determined", "not-running" (macOS can only say while Chrome is open) or "unknown …".
+   */
+  readChromeAutomation(): Promise<string>;
 }
+
+/** Keeps Chrome's last known Automation answer across restarts, for when Chrome isn't open to ask. */
+export interface AutomationMemory {
+  load(): string | null;
+  save(state: PermissionState): void;
+}
+
+/** The answers worth remembering; "unknown" never replaces a real one. */
+const KNOWN_STATES: readonly PermissionState[] = ["granted", "denied", "not-determined"];
 
 /** The System Settings pane for each permission. */
 const SETTINGS_URLS: Record<PermissionKind, string> = {
@@ -47,11 +61,30 @@ end if`;
  * macOS shows its own prompts; this class triggers them and opens the right Settings pane.
  */
 export class Permissions {
-  private automationState: PermissionState = "unknown";
+  private automationState: PermissionState;
   private screenCaptureTried = false;
 
-  /** @param platform Electron's APIs, or fakes in tests. */
-  constructor(private readonly platform: PermissionsPlatform) {}
+  /**
+   * @param platform Electron's APIs, or fakes in tests.
+   * @param memory Where Chrome's last known answer is kept; nowhere by default.
+   */
+  constructor(
+    private readonly platform: PermissionsPlatform,
+    private readonly memory: AutomationMemory = { load: () => null, save: () => undefined },
+  ) {
+    const saved = memory.load() as PermissionState | null;
+    this.automationState = saved !== null && KNOWN_STATES.includes(saved) ? saved : "unknown";
+  }
+
+  /**
+   * Reads macOS's saved answer for controlling Chrome, without prompting. Run at launch and whenever the
+   * Permissions tab asks, so an answer given once isn't shown as "Not checked yet" after every restart.
+   * While Chrome is closed macOS can't say, so the last known answer stays.
+   */
+  async refreshAutomation(): Promise<void> {
+    const answer = await this.platform.readChromeAutomation().catch(() => "unknown");
+    this.setAutomation(answer.trim() as PermissionState);
+  }
 
   /**
    * Reports every permission's current state. Accessibility and Screen Recording are yes/no checks on
@@ -113,11 +146,23 @@ export class Permissions {
   private async probeChromeAutomation(): Promise<void> {
     try {
       const output = await this.platform.runAppleScript(CHROME_PROBE);
-      this.automationState = output.trim() === "not-running" ? "unknown" : "granted";
+      this.setAutomation(output.trim() === "not-running" ? "unknown" : "granted");
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
-      this.automationState = text.includes(APPLE_EVENTS_NOT_AUTHORIZED) ? "denied" : "unknown";
+      this.setAutomation(text.includes(APPLE_EVENTS_NOT_AUTHORIZED) ? "denied" : "unknown");
     }
+  }
+
+  /**
+   * Takes a real answer about Chrome and remembers it; anything else leaves the last known one.
+   * @param state What was learned.
+   */
+  private setAutomation(state: PermissionState): void {
+    if (!KNOWN_STATES.includes(state)) {
+      return;
+    }
+    this.automationState = state;
+    this.memory.save(state);
   }
 }
 
@@ -146,5 +191,16 @@ export function mapMediaStatus(status: string): PermissionState {
  */
 export async function runAppleScript(script: string): Promise<string> {
   const { stdout } = await execFileAsync("osascript", ["-e", script], { timeout: 15_000 });
+  return stdout;
+}
+
+/**
+ * Asks the front-window helper for macOS's saved Chrome Automation answer. The helper is our own child, so
+ * macOS answers for Time Center, and it never prompts.
+ * @param helper The active-window helper's path.
+ * @returns e.g. "granted" or "not-running".
+ */
+export async function readAutomationStatus(helper: string): Promise<string> {
+  const { stdout } = await execFileAsync(helper, ["--automation-status", "com.google.Chrome"], { timeout: 5_000 });
   return stdout;
 }

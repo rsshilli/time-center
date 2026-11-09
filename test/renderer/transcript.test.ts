@@ -75,6 +75,8 @@ describe("stateText", () => {
     waitingChunks: 0,
     unreadChunks: 0,
     lines: [],
+    actionItems: [],
+    actionItemsBehind: false,
     ...fields,
   });
 

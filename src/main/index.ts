@@ -30,7 +30,7 @@ import { BackupScheduler } from "./backup/BackupScheduler";
 import { BackupService } from "./backup/BackupService";
 import { S3ObjectStorage } from "./backup/ObjectStorage";
 import { registerIpcHandlers } from "./ipcHandlers";
-import { Permissions, runAppleScript } from "./permissions/Permissions";
+import { Permissions, readAutomationStatus, runAppleScript } from "./permissions/Permissions";
 import { RecordingController } from "./recording/RecordingController";
 import { mixLeftoverSides, startRecorder } from "./recording/recorderProcess";
 import {
@@ -46,6 +46,8 @@ import { Transcriber } from "./recording/Transcriber";
 import { cancelWhisper, prepareWhisper, runWhisper, transcribeSpeech } from "./recording/whisper";
 import { CallQuestionStore } from "./recording/CallQuestionStore";
 import { askAboutCalls } from "./recording/callQuestions";
+import { ActionItemStore } from "./recording/ActionItemStore";
+import { ActionItemFinder } from "./recording/actionItems";
 import { cleanUpScreenshots } from "./screenshots/cleanUpScreenshots";
 import { captureDisplays, sampleCpuPercent } from "./screenshots/platform";
 import { ScreenCapturer } from "./screenshots/ScreenCapturer";
@@ -58,6 +60,9 @@ import { WindowManager, type Screen } from "./WindowManager";
 
 /** How many past questions about calls the Recordings tab shows. */
 const QUESTIONS_SHOWN = 30;
+
+/** The setting that keeps Chrome's last Automation answer, shown while Chrome is closed. */
+const CHROME_AUTOMATION_SETTING = "permissions.chromeAutomation";
 
 /** How long quitting waits for a backup in progress before giving up on it. */
 const QUIT_WAIT_MS = 30_000;
@@ -89,6 +94,8 @@ async function main(): Promise<void> {
   const recordings = new RecordingStore(store.db);
   const callQuestions = new CallQuestionStore(store.db);
   const sonnet = new BedrockHaiku(undefined, BEDROCK_SONNET_MODEL);
+  const actionItems = new ActionItemStore(store.db);
+  const actionItemFinder = new ActionItemFinder({ recordings, store: actionItems, haiku: new BedrockHaiku(), now: () => Date.now() });
   const transcriber = createTranscriber(recordings);
   // Finds whisper and the model (downloading it the first time) now, so a problem shows before the first call.
   void transcriber.prepareAhead();
@@ -134,7 +141,7 @@ async function main(): Promise<void> {
     now: () => Date.now(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   });
-  const permissions = createPermissions();
+  const permissions = createPermissions(store);
   const windows = new WindowManager();
   const backupService = new BackupService(
     store,
@@ -220,6 +227,8 @@ async function main(): Promise<void> {
       const { whisper, model } = await prepareWhisper(join(app.getPath("userData"), "models"), false);
       return transcribeSpeech(whisper, model, wav, join(app.getPath("temp"), "time-center-dictation"));
     },
+    actionItems,
+    refreshActionItems: (recordingId) => actionItemFinder.refresh(recordingId),
     now: () => Date.now(),
   });
   handleScreenshotScheme(activity);
@@ -286,9 +295,11 @@ async function main(): Promise<void> {
     store.close();
   });
 
-  if (permissions.needsAttention()) {
-    windows.show("permissions");
-  }
+  void permissions.refreshAutomation().then(() => {
+    if (permissions.needsAttention()) {
+      windows.show("permissions");
+    }
+  });
 }
 
 /**
@@ -444,10 +455,15 @@ function helperPath(name: "active-window" | "meeting-recorder" = "active-window"
 }
 
 /**
- * Wires the permissions logic to Electron's real macOS APIs.
+ * Wires the permissions logic to Electron's real macOS APIs, keeping Chrome's last answer in settings.
+ * @param store The database, for that setting.
  * @returns The permissions service.
  */
-function createPermissions(): Permissions {
+function createPermissions(store: Store): Permissions {
+  const memory = {
+    load: () => store.getSetting(CHROME_AUTOMATION_SETTING),
+    save: (state: string) => store.setSetting(CHROME_AUTOMATION_SETTING, state),
+  };
   return new Permissions({
     isTrustedAccessibilityClient: (prompt) => systemPreferences.isTrustedAccessibilityClient(prompt),
     getMediaAccessStatus: (mediaType) => systemPreferences.getMediaAccessStatus(mediaType),
@@ -458,7 +474,8 @@ function createPermissions(): Permissions {
     },
     openExternal: (url) => shell.openExternal(url),
     runAppleScript,
-  });
+    readChromeAutomation: () => readAutomationStatus(helperPath()),
+  }, memory);
 }
 
 /**

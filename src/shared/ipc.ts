@@ -180,6 +180,34 @@ export interface CallRecording {
   /** Pieces whisper couldn't read, set aside (still in the audio files). */
   unreadChunks: number;
   lines: TranscriptLine[];
+  /** Action items Haiku found while you watched the call, newest first; empty if it never looked. */
+  actionItems: ActionItem[];
+  /** Whether Haiku has looked at this call and words came in since, so it still owes a final look. */
+  actionItemsBehind: boolean;
+}
+
+/**
+ * How long after a call ends it still counts as live: its last words are being transcribed and Haiku may take
+ * a final look. After that, action items are never looked for again.
+ */
+export const CALL_FINISHING_MS = 10 * 60_000;
+
+/** Something a call suggests someone should do, as Haiku found it. */
+export interface ActionItem {
+  /** e.g. "You: send Dana the sandbox keys". */
+  text: string;
+  /** When it was said. */
+  saidAt: number;
+}
+
+/** A live call's action items, after Haiku looked again (or chose not to: nothing new was said). */
+export interface ActionItemsReport {
+  /** Newest first. */
+  items: ActionItem[];
+  /** When Haiku last read the call; null if it never has. */
+  checkedAt: number | null;
+  /** Why the last look failed, or null. */
+  problem: string | null;
 }
 
 /** The day's recorded calls, and anything stopping transcription. */
@@ -350,6 +378,7 @@ export const IPC = {
   askAboutCalls: "recordings:ask",
   getCallQuestions: "recordings:questions",
   transcribeDictation: "recordings:dictate",
+  refreshActionItems: "recordings:action-items",
 } as const;
 
 /** The API the preload script exposes to the renderer as `window.timeCenter`. */
@@ -414,4 +443,9 @@ export interface TimeCenterApi {
   getCallQuestions(): Promise<CallQuestion[]>;
   /** Turns dictated speech (a 16 kHz mono 16-bit WAV) into text with whisper, on the Mac. */
   transcribeDictation(wav: ArrayBuffer): Promise<string>;
+  /**
+   * A call's potential action items. Asked only while the Recordings tab shows a live call, so Haiku only
+   * reads a call you're watching; it looks again when there are new words and a minute has passed.
+   */
+  refreshActionItems(recordingId: number): Promise<ActionItemsReport>;
 }

@@ -13,6 +13,10 @@
 // Usage: active-window --capture --ignore com.microsoft.edgemac
 // Takes one screenshot of every display with the ignored apps' windows left out of the picture (what is
 // behind them shows instead), prints them as one JSON array, then exits. Needs Screen Recording.
+//
+// Usage: active-window --automation-status com.google.Chrome
+// Prints macOS's saved answer to "allow Time Center to control <app>" without ever showing the prompt:
+// granted, denied, not-determined, not-running (macOS can only say while the app is open) or unknown.
 
 import AppKit
 import ApplicationServices
@@ -325,11 +329,41 @@ func scaled(_ image: CGImage, width: Int) -> CGImage? {
     return context.makeImage()
 }
 
-/// Reads `--interval`, `--ignore` and `--capture` from the command line.
-func parseArguments() -> (interval: TimeInterval, ignored: Set<String>, captureOnly: Bool) {
+/// macOS's saved Automation answer for sending Apple events to an app, asked without prompting.
+/// - Parameter bundleId: The app, e.g. "com.google.Chrome".
+/// - Returns: "granted", "denied", "not-determined", "not-running" or "unknown <code>".
+func automationStatus(_ bundleId: String) -> String {
+    var target = AEAddressDesc()
+    let created = bundleId.withCString { pointer in
+        AECreateDesc(DescType(typeApplicationBundleID), pointer, strlen(pointer), &target)
+    }
+    guard created == noErr else {
+        return "unknown \(created)"
+    }
+    defer {
+        AEDisposeDesc(&target)
+    }
+    let status = AEDeterminePermissionToAutomateTarget(&target, AEEventClass(typeWildCard), AEEventID(typeWildCard), false)
+    switch Int(status) {
+    case Int(noErr):
+        return "granted"
+    case Int(errAEEventNotPermitted):
+        return "denied"
+    case Int(errAEEventWouldRequireUserConsent):
+        return "not-determined"
+    case Int(procNotFound):
+        return "not-running"
+    default:
+        return "unknown \(status)"
+    }
+}
+
+/// Reads `--interval`, `--ignore`, `--capture` and `--automation-status` from the command line.
+func parseArguments() -> (interval: TimeInterval, ignored: Set<String>, captureOnly: Bool, automationTarget: String?) {
     var interval: TimeInterval = 3
     var ignored = Set<String>()
     var captureOnly = false
+    var automationTarget: String?
     let args = CommandLine.arguments
     var index = 1
     while index < args.count {
@@ -342,13 +376,21 @@ func parseArguments() -> (interval: TimeInterval, ignored: Set<String>, captureO
             index += 1
         } else if args[index] == "--capture" {
             captureOnly = true
+        } else if args[index] == "--automation-status" {
+            automationTarget = value
+            index += 1
         }
         index += 1
     }
-    return (interval, ignored, captureOnly)
+    return (interval, ignored, captureOnly, automationTarget)
 }
 
-let (interval, ignored, captureOnly) = parseArguments()
+let (interval, ignored, captureOnly, automationTarget) = parseArguments()
+
+if let automationTarget {
+    print(automationStatus(automationTarget))
+    exit(0)
+}
 
 if captureOnly {
     Task {

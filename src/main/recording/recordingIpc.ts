@@ -1,7 +1,8 @@
-import { ipcMain } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 import {
   CALL_QUESTION_SCOPES,
   IPC,
+  type ActionItemsReport,
   type CallQuestion,
   type CallQuestionRequest,
   type CallQuestionScope,
@@ -11,6 +12,7 @@ import {
 import { localDayBounds } from "../activity/dayReport";
 import type { CalendarEvent } from "../calendar/meetingLinks";
 import { assertMoment, assertRowId } from "../ipcHandlers";
+import type { ActionItemStore } from "./ActionItemStore";
 import { bestMeeting } from "./callMeeting";
 import type { RecordingStore } from "./RecordingStore";
 import type { Transcriber } from "./Transcriber";
@@ -31,6 +33,10 @@ export interface RecordingIpcDependencies {
   listQuestions(): CallQuestion[];
   /** Turns dictated speech (WAV bytes) into text. */
   dictate(wav: Uint8Array): Promise<string>;
+  /** Each call's saved action items. */
+  actionItems: Pick<ActionItemStore, "getItems">;
+  /** Brings a call's action items up to date with Haiku, when it's time to. */
+  refreshActionItems(recordingId: number): Promise<ActionItemsReport>;
   now(): number;
 }
 
@@ -57,6 +63,14 @@ export function registerRecordingIpc(deps: RecordingIpcDependencies): void {
   ipcMain.handle(IPC.askAboutCalls, (_event, request: unknown) => deps.ask(assertQuestionRequest(request)));
   ipcMain.handle(IPC.getCallQuestions, () => deps.listQuestions());
   ipcMain.handle(IPC.transcribeDictation, (_event, wav: unknown) => deps.dictate(assertDictation(wav)));
+  ipcMain.handle(IPC.refreshActionItems, (event, id: unknown) => {
+    // Haiku reads a call only while you can see it: a hidden or minimized window asking is refused.
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window?.isVisible() || window.isMinimized()) {
+      throw new Error("Action items are only looked for while the window is in view.");
+    }
+    return deps.refreshActionItems(assertRowId(id));
+  });
 }
 
 /**
@@ -105,13 +119,15 @@ export function assertDictation(value: unknown): Uint8Array {
  * @returns The report.
  */
 export function buildRecordingsReport(
-  deps: Pick<RecordingIpcDependencies, "store" | "transcriber" | "listMeetings" | "countUnread" | "now">,
+  deps: Pick<RecordingIpcDependencies, "store" | "transcriber" | "listMeetings" | "countUnread" | "actionItems" | "now">,
   at: number,
 ): RecordingsReport {
   const { dayStart, dayEnd } = localDayBounds(at);
   const meetings = deps.listMeetings(dayStart, dayEnd).filter((meeting) => meeting.response !== "declined");
-  const recordings = deps.store.listRecordings(dayStart, dayEnd).map(
-    (recording): CallRecording => ({
+  const recordings = deps.store.listRecordings(dayStart, dayEnd).map((recording): CallRecording => {
+    const lines = deps.store.listLines(recording.id);
+    const saved = deps.actionItems.getItems(recording.id);
+    return {
       id: recording.id,
       start: recording.start,
       end: recording.end,
@@ -121,8 +137,10 @@ export function buildRecordingsReport(
       audioKept: !recording.audioDeleted,
       waitingChunks: deps.transcriber.waiting(recording.id),
       unreadChunks: recording.audioDeleted ? 0 : deps.countUnread(recording.folder),
-      lines: deps.store.listLines(recording.id),
-    }),
-  );
+      lines,
+      actionItems: saved?.items ?? [],
+      actionItemsBehind: saved !== null && lines.length > saved.coveredLines,
+    };
+  });
   return { recordings, transcriberProblem: deps.transcriber.currentProblem() };
 }

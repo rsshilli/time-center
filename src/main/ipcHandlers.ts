@@ -73,7 +73,10 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     deps.onIgnoredAppsChanged();
     return checked;
   });
-  ipcMain.handle(IPC.getPermissions, () => deps.permissions.getAll());
+  ipcMain.handle(IPC.getPermissions, async () => {
+    await deps.permissions.refreshAutomation();
+    return deps.permissions.getAll();
+  });
   ipcMain.handle(IPC.requestPermission, (_event, kind: unknown) => deps.permissions.request(assertPermissionKind(kind)));
   ipcMain.handle(IPC.openPermissionSettings, (_event, kind: unknown) =>
     deps.permissions.openSettings(assertPermissionKind(kind)),

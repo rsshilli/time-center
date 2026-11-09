@@ -36,6 +36,7 @@ const api: TimeCenterApi = {
   askAboutCalls: (request) => ipcRenderer.invoke(IPC.askAboutCalls, request),
   getCallQuestions: () => ipcRenderer.invoke(IPC.getCallQuestions),
   transcribeDictation: (wav) => ipcRenderer.invoke(IPC.transcribeDictation, wav),
+  refreshActionItems: (recordingId) => ipcRenderer.invoke(IPC.refreshActionItems, recordingId),
 };
 
 contextBridge.exposeInMainWorld("timeCenter", api);

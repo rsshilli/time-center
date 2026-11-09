@@ -164,4 +164,19 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX recording_questions_asked_at ON recording_questions (asked_at);
   `,
+  `
+  -- The action items Haiku found in a call while you watched it on the Recordings tab. items is a JSON list
+  -- of { text, saidAt }; covered_until is the end of the last transcript line it had read.
+  CREATE TABLE recording_action_items (
+    recording_id  INTEGER PRIMARY KEY REFERENCES recordings (id) ON DELETE CASCADE,
+    items         TEXT NOT NULL,
+    covered_until TEXT NOT NULL,
+    checked_at    TEXT NOT NULL
+  );
+  `,
+  `
+  -- How many transcript lines Haiku had read. Your side and theirs are transcribed separately, so a line can
+  -- arrive with an earlier time than covered_until; the count notices it.
+  ALTER TABLE recording_action_items ADD COLUMN covered_lines INTEGER NOT NULL DEFAULT 0;
+  `,
 ];

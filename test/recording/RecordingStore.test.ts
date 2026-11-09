@@ -73,12 +73,19 @@ describe("RecordingStore", () => {
         transcriber: { waiting: () => 2, currentProblem: () => null },
         listMeetings: () => meetings,
         countUnread: () => 0,
+        actionItems: { getItems: (id) => ({ recordingId: id, items: [{ text: "You: book it", saidAt: NOON }], coveredUntil: NOON, coveredLines: 1, checkedAt: NOON }) },
         now: () => NOON + 20 * MIN,
       },
       NOON,
     );
     expect(report.recordings).toEqual([
-      expect.objectContaining({ end: null, meetingTitle: "1-1", waitingChunks: 2, audioKept: true }),
+      expect.objectContaining({
+        end: null,
+        meetingTitle: "1-1",
+        waitingChunks: 2,
+        audioKept: true,
+        actionItems: [{ text: "You: book it", saidAt: NOON }],
+      }),
     ]);
   });
 

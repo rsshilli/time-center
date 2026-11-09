@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CallRecording, RecordingsReport } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
+import { ActionItemList } from "./LiveCallCard";
 import { SIDE_NAMES, formatClock, groupTurns, transcriptText } from "../shared/transcript";
 
-/** How often the card re-reads while a call is recording or being transcribed. */
+/** How often the day's calls are re-read while a call is recording or being transcribed. */
 const BUSY_REFRESH_MS = 5_000;
 
-/** How often it re-reads otherwise, to notice a new call. */
+/** How often they're re-read otherwise, to notice a new call. */
 const IDLE_REFRESH_MS = 30_000;
 
 /**
- * The day's recorded calls, each with its transcript (you and them, turn by turn), its state while it is
- * still recording or being transcribed, and its audio in Finder for the 30 days it's kept.
- * @param props.at A moment in the day to show.
+ * Reads the picked day's calls, often while one is recording or being transcribed and now and then otherwise.
+ * @param at A moment in the day.
+ * @returns The report (null until it first loads, and again when the day changes) and any error.
  */
-export function RecordingsCard({ at }: { at: number }) {
+export function useRecordings(at: number): { report: RecordingsReport | null; error: string | null } {
   const [report, setReport] = useState<RecordingsReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Counts requests, so a slow answer for a day you already left can't replace a newer one. */
@@ -49,19 +50,32 @@ export function RecordingsCard({ at }: { at: number }) {
     return () => clearInterval(timer);
   }, [load, busy]);
 
-  if (error) {
-    return <p className="error">Couldn't load the calls: {error}</p>;
-  }
-  if (!report) {
-    return null;
-  }
+  return { report, error };
+}
+
+/**
+ * The day's recorded calls, each with its action items, its transcript (you and them, turn by turn), its
+ * state while it is still being transcribed, and its audio in Finder for the 30 days it's kept.
+ * @param props.recordings The calls to list (the live one is shown above instead).
+ * @param props.transcriberProblem Anything stopping transcription.
+ * @param props.earlier Whether a live call is shown above, so these are the earlier ones.
+ */
+export function RecordingsCard({
+  recordings,
+  transcriberProblem,
+  earlier,
+}: {
+  recordings: CallRecording[];
+  transcriberProblem: string | null;
+  earlier: boolean;
+}) {
   return (
     <div className="card recordings">
-      <h2>Calls</h2>
-      {report.transcriberProblem && <p className="message">{report.transcriberProblem}</p>}
-      {report.recordings.length === 0 && <p className="muted">No calls recorded on this day.</p>}
+      <h2>{earlier ? "Earlier calls" : "Calls"}</h2>
+      {transcriberProblem && <p className="message">{transcriberProblem}</p>}
+      {recordings.length === 0 && <p className="muted">{earlier ? "No earlier calls on this day." : "No calls recorded on this day."}</p>}
       <ul className="recording-list">
-        {report.recordings.map((recording) => (
+        {recordings.map((recording) => (
           <RecordingItem key={recording.id} recording={recording} />
         ))}
       </ul>
@@ -130,6 +144,12 @@ function RecordingItem({ recording }: { recording: CallRecording }) {
         <p className="muted">Part of this call couldn't be transcribed; it's still in the audio.</p>
       )}
       {message && <p className="message">{message}</p>}
+      {recording.actionItems.length > 0 && (
+        <div className="recording-actions-found">
+          <h3>Possible action items</h3>
+          <ActionItemList items={recording.actionItems} />
+        </div>
+      )}
       {open && (
         <ol className="transcript">
           {turns.map((turn) => (

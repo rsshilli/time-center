@@ -27,6 +27,7 @@
     "@aws-sdk/client-s3": "^3.1162.0"
   },
   "devDependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1165.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

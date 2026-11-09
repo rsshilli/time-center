@@ -4,9 +4,10 @@ A Mac menu-bar app that shows where your day went. It joins your meetings on tim
 transcribes your calls.
 
 Everything stays on your Mac: the activity log, screenshots, recordings and transcripts. Nothing leaves
-it except three things, and only when you set them up or use them: a weekly backup of the database to
-your own S3 bucket, meeting titles sent to Claude to sort them into types, and the transcripts of the
-calls you ask Claude a question about.
+it except four things, and only when you set them up or use them: a weekly backup of the database to
+your own S3 bucket, meeting titles sent to Claude to sort them into types, the transcripts of the calls
+you ask Claude a question about, and the transcript of a call you're watching live on the Recordings tab,
+which Claude reads for action items.
 
 ![The Today tab: a timeline of the day by app, and time per category, app, project, website and meeting](docs/screenshots/today.png)
 
@@ -30,6 +31,11 @@ calls you ask Claude a question about.
   at low priority, and nothing is uploaded.
 - **Recordings tab.** Your calls for the day, each with its transcript, a Copy button and a link to the
   audio file. Pick a day in either the Today tab or the Recordings tab, and the other tab shows the same day.
+- **Action items during a call.** While a call is going, the Recordings tab shows its transcript on the
+  left as it's heard and, on the right, the five newest possible action items ("You: send Dana the test
+  cards"), found by Claude Haiku. Haiku only reads the call while that tab is open and the window is in
+  view, at most once a minute, plus a last look in the few minutes after the call ends while its final
+  words are transcribed. The items stay with the call, under it in the list of earlier calls.
 - **Ask about your calls.** At the top of the Recordings tab, type a question, or click the mic to say
   it (whisper turns it into text on your Mac). Ask about one call (even one still going), the picked
   day's calls, or all your calls. For all calls, the app searches the transcripts for your question's
@@ -54,9 +60,9 @@ calls you ask Claude a question about.
 - Xcode or the Command Line Tools (`xcode-select --install`), to build the two small Swift helpers.
 - [Homebrew](https://brew.sh), for whisper.cpp: `brew install whisper-cpp`.
 - Google Chrome, for Meet and Teams, and to read the address of the tab you're on.
-- **Optional:** a Google Cloud OAuth client, for calendar joining (see below).
+- **Optional:** a Google Cloud OAuth client, for calendar joining (see below; QbDVision folks get one from AWS).
 - **Optional:** AWS credentials, for backups to S3, and for Claude on Amazon Bedrock (sorting meetings
-  into types, answering questions about your calls).
+  into types, answering questions about your calls, finding action items).
 
 ## Install
 
@@ -102,6 +108,20 @@ recorded but not transcribed. The Recordings tab tells you how to install it.
 
 The app signs in to Google with its own OAuth client, which is built into the app from a gitignored `.env`.
 
+**At QbDVision?** Skip Google Cloud. With your AWS credentials for the company account set up, run:
+
+```bash
+npm run google:client -- --qbdvision   # add AWS_PROFILE=… in front if it isn't your default profile
+npm run packageAndRun
+```
+
+This copies the shared Time Center client from AWS Secrets Manager (`time-center/google-oauth-client`,
+us-east-1) into `.env`. It works only for qbdvision.com Google accounts. Then go to **Settings → Meetings**
+and sign in. (To replace the shared client, put the new one in your `.env` and run
+`npm run google:client -- --publish`.)
+
+**Everyone else:**
+
 1. In [Google Cloud Console](https://console.cloud.google.com), create a project and enable the
    **Google Calendar API**.
 2. Under **APIs & Services → Credentials**, create an **OAuth client ID** of type **Desktop app** and
@@ -119,17 +139,19 @@ can also enter a KMS key. Once a week the app uploads a copy of the database, an
 week the Mac was off. To move to a new Mac, use **Restore latest backup…** on the same page. Screenshots
 and audio aren't included.
 
-### Claude on Amazon Bedrock (meeting types and questions)
+### Claude on Amazon Bedrock (meeting types, questions and action items)
 
-Two features use Claude on Amazon Bedrock:
+Three features use Claude on Amazon Bedrock:
 
 - **Meeting types.** Under **Settings → Meeting types**, Claude Haiku 4.5 labels each meeting as a
   one-on-one, a daily stand-up, management, an architecture or product review, a customer call, or other.
   It sends only the meeting's title and attendee list.
 - **Questions about calls.** Claude Sonnet 5.5 answers what you ask on the Recordings tab. It sends the
   transcripts of the calls your question covers, with their meeting titles and times.
+- **Action items.** Claude Haiku 4.5 reads the transcript of the call you're watching on the Recordings
+  tab, with the action items it found so far. Nothing is sent when the tab is closed or the window is hidden.
 
-Both use the AWS keys your login shell exports (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
+All three use the AWS keys your login shell exports (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
 `AWS_REGION`, which defaults to `us-east-1`). The account needs Bedrock access to Anthropic models.
 
 ## Where your data lives
@@ -138,7 +160,7 @@ All in `~/Library/Application Support/Time Center/`:
 
 | Path | What |
 |------|------|
-| `time-center.db` | The SQLite database: activity, meetings, rules, transcripts, your questions and answers |
+| `time-center.db` | The SQLite database: activity, meetings, rules, transcripts, action items, your questions and answers |
 | `screenshots/YYYY-MM-DD/` | Once-a-minute screenshots, kept 30 days |
 | `recordings/` | One `.m4a` per call, kept 30 days |
 | `models/` | The Whisper speech model |
