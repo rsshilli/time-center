@@ -189,6 +189,44 @@ export interface RecordingsReport {
   transcriberProblem: string | null;
 }
 
+/** Which calls a question is about: one call, the picked day's calls, or every call that mentions its words. */
+export type CallQuestionScope = "call" | "day" | "all";
+
+/** The scopes, for checking what the renderer sends. */
+export const CALL_QUESTION_SCOPES: readonly CallQuestionScope[] = ["call", "day", "all"];
+
+/** A question to ask about your calls. */
+export interface CallQuestionRequest {
+  question: string;
+  scope: CallQuestionScope;
+  /** A moment in the picked day, for "day" (and to find "call"'s day). */
+  at: number;
+  /** The call, for "call"; null otherwise. */
+  recordingId: number | null;
+}
+
+/** A call whose transcript was sent with a question. */
+export interface CallQuestionSource {
+  recordingId: number;
+  start: number;
+  /** The meeting it overlapped, or null. */
+  title: string | null;
+}
+
+/** A question you asked, with Sonnet's answer, as saved. */
+export interface CallQuestion {
+  id: number;
+  askedAt: number;
+  question: string;
+  scope: CallQuestionScope;
+  sources: CallQuestionSource[];
+  /** How the calls were picked, when that matters, e.g. "No calls mention those words, so…". */
+  note: string | null;
+  /** Null when asking failed. */
+  answer: string | null;
+  error: string | null;
+}
+
 /** Everything the dashboard shows for one day. */
 export interface DayReport {
   /** Local midnight that starts the day, in milliseconds since 1970. */
@@ -213,13 +251,25 @@ export interface DayReport {
 export type MeetingProvider = "meet" | "zoom" | "teams";
 
 /**
+ * What happens when a meeting is about to start. join: it's opened automatically. notify: a notice says
+ * it's starting, and clicking it joins. off: nothing.
+ */
+export type JoinMode = "join" | "notify" | "off";
+
+/** Every join mode, to check what the renderer sends. */
+export const JOIN_MODES: readonly JoinMode[] = ["join", "notify", "off"];
+
+/**
  * Where one meeting stands. will-join: it'll be joined at its join time. joining: the 30-second notice is
- * up. joined / skipped / failed: decided. missed: its join time passed while the Mac slept or the app was
+ * up. will-notify: a click-to-join notice will show at its join time. notified: that notice was shown.
+ * joined / skipped / failed: decided. missed: its join time passed while the Mac slept or the app was
  * closed. no-link, declined: never joined. auto-join-off: the setting is off.
  */
 export type MeetingState =
   | "will-join"
   | "joining"
+  | "will-notify"
+  | "notified"
   | "joined"
   | "skipped"
   | "failed"
@@ -247,7 +297,7 @@ export interface CalendarStatus {
   signedIn: boolean;
   /** The calendar's Google account, once known. */
   account: string | null;
-  autoJoin: boolean;
+  joinMode: JoinMode;
   lastSyncAt: number | null;
   lastError: string | null;
   /** Today's remaining meetings and the next day's, soonest first. */
@@ -286,7 +336,7 @@ export const IPC = {
   chooseGoogleClient: "calendar:choose-client",
   signInToGoogle: "calendar:sign-in",
   signOutOfGoogle: "calendar:sign-out",
-  setAutoJoin: "calendar:set-auto-join",
+  setJoinMode: "calendar:set-join-mode",
   skipMeeting: "calendar:skip",
   joinMeetingNow: "calendar:join-now",
   setMeetingType: "meetings:set-type",
@@ -297,6 +347,9 @@ export const IPC = {
   copyScreenshot: "screenshots:copy",
   getRecordings: "recordings:get",
   showRecordingAudio: "recordings:show-audio",
+  askAboutCalls: "recordings:ask",
+  getCallQuestions: "recordings:questions",
+  transcribeDictation: "recordings:dictate",
 } as const;
 
 /** The API the preload script exposes to the renderer as `window.timeCenter`. */
@@ -333,8 +386,8 @@ export interface TimeCenterApi {
   signInToGoogle(): Promise<CalendarStatus>;
   /** Forgets the Google sign-in and stops joining meetings. */
   signOutOfGoogle(): Promise<CalendarStatus>;
-  /** Turns automatic joining on or off. */
-  setAutoJoin(on: boolean): Promise<CalendarStatus>;
+  /** Chooses whether meetings are joined automatically, announced with a click-to-join notice, or left alone. */
+  setJoinMode(mode: JoinMode): Promise<CalendarStatus>;
   /** Won't join this occurrence of the meeting. */
   skipMeeting(eventId: string): Promise<CalendarStatus>;
   /** Joins the meeting straight away. */
@@ -355,4 +408,10 @@ export interface TimeCenterApi {
   getRecordings(at: number): Promise<RecordingsReport>;
   /** Shows a call's audio files in Finder. */
   showRecordingAudio(id: number): Promise<void>;
+  /** Asks Sonnet a question about your calls; the question and its answer (or error) are saved. */
+  askAboutCalls(request: CallQuestionRequest): Promise<CallQuestion>;
+  /** The questions you asked before, newest first. */
+  getCallQuestions(): Promise<CallQuestion[]>;
+  /** Turns dictated speech (a 16 kHz mono 16-bit WAV) into text with whisper, on the Mac. */
+  transcribeDictation(wav: ArrayBuffer): Promise<string>;
 }

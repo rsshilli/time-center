@@ -22,7 +22,7 @@ const api: TimeCenterApi = {
   chooseGoogleClient: () => ipcRenderer.invoke(IPC.chooseGoogleClient),
   signInToGoogle: () => ipcRenderer.invoke(IPC.signInToGoogle),
   signOutOfGoogle: () => ipcRenderer.invoke(IPC.signOutOfGoogle),
-  setAutoJoin: (on) => ipcRenderer.invoke(IPC.setAutoJoin, on),
+  setJoinMode: (mode) => ipcRenderer.invoke(IPC.setJoinMode, mode),
   skipMeeting: (eventId) => ipcRenderer.invoke(IPC.skipMeeting, eventId),
   joinMeetingNow: (eventId) => ipcRenderer.invoke(IPC.joinMeetingNow, eventId),
   setMeetingType: (eventId, type) => ipcRenderer.invoke(IPC.setMeetingType, eventId, type),
@@ -33,6 +33,9 @@ const api: TimeCenterApi = {
   copyScreenshot: (id) => ipcRenderer.invoke(IPC.copyScreenshot, id),
   getRecordings: (at) => ipcRenderer.invoke(IPC.getRecordings, at),
   showRecordingAudio: (id) => ipcRenderer.invoke(IPC.showRecordingAudio, id),
+  askAboutCalls: (request) => ipcRenderer.invoke(IPC.askAboutCalls, request),
+  getCallQuestions: () => ipcRenderer.invoke(IPC.getCallQuestions),
+  transcribeDictation: (wav) => ipcRenderer.invoke(IPC.transcribeDictation, wav),
 };
 
 contextBridge.exposeInMainWorld("timeCenter", api);

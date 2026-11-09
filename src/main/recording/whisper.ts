@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { setPriority } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
@@ -45,12 +45,16 @@ export function cancelWhisper(): void {
 /**
  * Finds whisper-cli and the speech model, downloading the model into the app's folder the first time.
  * @param modelsDir The app's models folder.
+ * @param wait Whether to wait for a download; false (for dictation, which you're watching) starts it and
+ *   says so straight away rather than leaving you waiting through 1.6 GB.
  * @returns Both paths.
  */
-export async function prepareWhisper(modelsDir: string): Promise<{ whisper: string; model: string }> {
+export async function prepareWhisper(modelsDir: string, wait = true): Promise<{ whisper: string; model: string }> {
   const whisper = WHISPER_CANDIDATES.find((path) => existsSync(path));
   if (!whisper) {
-    throw new Error("whisper.cpp isn't installed, so calls aren't transcribed yet. Install it in Terminal with: brew install whisper-cpp");
+    throw new Error(
+      "whisper.cpp isn't installed, so calls and dictated questions can't be turned into text yet. Install it in Terminal with: brew install whisper-cpp",
+    );
   }
   const model = join(modelsDir, MODEL_FILE);
   if (existsSync(model)) {
@@ -59,6 +63,12 @@ export async function prepareWhisper(modelsDir: string): Promise<{ whisper: stri
   downloading ??= downloadModel(model).finally(() => {
     downloading = null;
   });
+  if (!wait) {
+    downloading.catch(() => {
+      // A failed download is reported by whoever waits for it; the next try starts it again.
+    });
+    throw new Error("the speech model (1.6 GB) is still downloading. Try again in a few minutes, or type your question.");
+  }
   try {
     return { whisper, model: await downloading };
   } catch (error) {
@@ -88,22 +98,53 @@ async function downloadModel(model: string): Promise<string> {
 }
 
 /**
- * Runs whisper-cli on one WAV at the lowest CPU priority and reads its JSON.
+ * Turns a dictated question into text right away, at normal priority, so you aren't kept waiting behind a
+ * call's chunks.
+ * @param whisper whisper-cli.
+ * @param model The model file.
+ * @param audio The speech, a WAV file's bytes.
+ * @param dir A folder for the file whisper reads; it is deleted afterwards.
+ * @returns The words heard, without whisper's sound tags such as "[BLANK_AUDIO]".
+ */
+export async function transcribeSpeech(whisper: string, model: string, audio: Uint8Array, dir: string): Promise<string> {
+  await mkdir(dir, { recursive: true });
+  const wav = join(dir, `dictation-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`);
+  await writeFile(wav, audio);
+  try {
+    const segments = await runWhisper(whisper, model, wav, 0);
+    return cleanDictation(segments.map((segment) => segment.text).join(" "));
+  } finally {
+    await rm(wav, { force: true });
+  }
+}
+
+/**
+ * Tidies dictated text: drops whisper's tags for sounds ("[BLANK_AUDIO]", "[Music]") and extra spaces.
+ * @param text What whisper heard.
+ * @returns The words.
+ */
+export function cleanDictation(text: string): string {
+  return text.replace(/\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Runs whisper-cli on one WAV, at the lowest CPU priority unless told otherwise, and reads its JSON.
  * @param whisper whisper-cli.
  * @param model The model file.
  * @param wav The audio.
+ * @param priority Its nice value: 19 (lowest, for calls) by default, 0 for a question you're waiting on.
  * @returns What it heard.
  */
-export async function runWhisper(whisper: string, model: string, wav: string): Promise<WhisperSegment[]> {
+export async function runWhisper(whisper: string, model: string, wav: string, priority = 19): Promise<WhisperSegment[]> {
   const base = wav.replace(/\.wav$/, "");
   const args = ["-m", model, "-f", wav, "-oj", "-of", base, "-np", "-t", "4", "--prompt", PROMPT];
   await new Promise<void>((resolve, reject) => {
     const child = spawn(whisper, args, { stdio: "ignore" });
     running.add(child);
     child.on("close", () => running.delete(child));
-    if (child.pid) {
+    if (child.pid && priority !== 0) {
       try {
-        setPriority(child.pid, 19);
+        setPriority(child.pid, priority);
       } catch {
         // It may already have finished; a short chunk takes a second or two.
       }

@@ -1,6 +1,7 @@
 import { CalendarStore } from "../../src/main/calendar/CalendarStore";
 import { JoinScheduler, LATE_JOIN_LIMIT_MS } from "../../src/main/calendar/JoinScheduler";
 import type { CalendarEvent } from "../../src/main/calendar/meetingLinks";
+import type { JoinMode } from "../../src/shared/ipc";
 import { Store } from "../../src/main/store/Store";
 
 const START = Date.parse("2026-11-05T15:00:00Z");
@@ -9,8 +10,9 @@ describe("JoinScheduler", () => {
   let store: Store;
   let calendar: CalendarStore;
   let clock: number;
-  let autoJoin: boolean;
+  let mode: JoinMode;
   let notices: { title: string; joinAt: number; skip: () => void; closed: boolean }[];
+  let reminders: { title: string; join: () => void; closed: boolean }[];
   let joined: string[];
   let failures: string[];
   let joinError: Error | null;
@@ -19,8 +21,9 @@ describe("JoinScheduler", () => {
     store = new Store(":memory:");
     calendar = new CalendarStore(store.db);
     clock = START - 10 * 60_000;
-    autoJoin = true;
+    mode = "join";
     notices = [];
+    reminders = [];
     joined = [];
     failures = [];
     joinError = null;
@@ -32,13 +35,22 @@ describe("JoinScheduler", () => {
   const build = () =>
     new JoinScheduler({
       calendar,
-      autoJoin: () => autoJoin,
+      joinMode: () => mode,
       notify: (event, joinAt, onSkip) => {
         const notice = { title: event.title, joinAt, skip: onSkip, closed: false };
         notices.push(notice);
         return {
           close: () => {
             notice.closed = true;
+          },
+        };
+      },
+      remind: (event, onJoin) => {
+        const reminder = { title: event.title, join: onJoin, closed: false };
+        reminders.push(reminder);
+        return {
+          close: () => {
+            reminder.closed = true;
           },
         };
       },
@@ -170,9 +182,10 @@ describe("JoinScheduler", () => {
     expect(scheduler.meetings().map((meeting) => meeting.state)).toEqual(["declined", "no-link"]);
 
     meetings({});
-    autoJoin = false;
+    mode = "off";
     await tickAt(scheduler, START - 30_000);
     expect(notices).toHaveLength(0);
+    expect(reminders).toHaveLength(0);
     expect(scheduler.meetings()[0].state).toBe("auto-join-off");
   });
 
@@ -180,7 +193,7 @@ describe("JoinScheduler", () => {
     meetings({});
     const scheduler = build();
     await tickAt(scheduler, START - 60_000);
-    autoJoin = false;
+    mode = "off";
     await tickAt(scheduler, START - 30_000);
     expect(notices[0].closed).toBe(true);
     expect(joined).toEqual([]);
@@ -209,11 +222,11 @@ describe("JoinScheduler", () => {
 
   it("should join at once on request, whatever the setting, and not again at the join time", async () => {
     meetings({ response: "declined" });
-    autoJoin = false;
+    mode = "off";
     const scheduler = build();
     await scheduler.joinNow("e0");
     expect(joined).toEqual(["e0"]);
-    autoJoin = true;
+    mode = "join";
     await tickAt(scheduler, START - 30_000);
     expect(joined).toEqual(["e0"]);
   });
@@ -244,11 +257,12 @@ describe("JoinScheduler", () => {
     let finishJoin = () => {};
     const scheduler = new JoinScheduler({
       calendar,
-      autoJoin: () => true,
+      joinMode: () => "join",
       notify: (event, joinAt, onSkip) => {
         notices.push({ title: event.title, joinAt, skip: onSkip, closed: false });
         return { close: () => {} };
       },
+      remind: () => ({ close: () => {} }),
       join: (event) =>
         new Promise<void>((resolve) => {
           joined.push(event.eventId);
@@ -289,5 +303,59 @@ describe("JoinScheduler", () => {
         joinAt: START - 30_000,
       },
     ]);
+  });
+
+  it("should only show a click-to-join notice at the join time when set to notify, and join when it's clicked", async () => {
+    meetings({ title: "Standup" });
+    mode = "notify";
+    const scheduler = build();
+    await tickAt(scheduler, START - 60_000);
+    expect(reminders).toHaveLength(0);
+    expect(scheduler.meetings()[0].state).toBe("will-notify");
+    await tickAt(scheduler, START - 30_000);
+    await tickAt(scheduler, START - 29_000);
+    expect(notices).toHaveLength(0);
+    expect(joined).toEqual([]);
+    expect(reminders.map((reminder) => reminder.title)).toEqual(["Standup"]);
+    expect(scheduler.meetings()[0].state).toBe("notified");
+
+    reminders[0].join();
+    await tickAt(scheduler, START - 28_000);
+    expect(joined).toEqual(["e0"]);
+    expect(scheduler.meetings()[0].state).toBe("joined");
+  });
+
+  it("should not join a meeting it already notified you about when the setting changes to join", async () => {
+    meetings({});
+    mode = "notify";
+    const scheduler = build();
+    await tickAt(scheduler, START - 30_000);
+    mode = "join";
+    await tickAt(scheduler, START - 10_000);
+    await tickAt(scheduler, START + 30_000);
+    expect(joined).toEqual([]);
+    expect(notices).toHaveLength(0);
+  });
+
+  it("should not notify you about a skipped meeting, and take the notice down once a meeting ends", async () => {
+    meetings({ title: "A" }, { title: "B", start: START + 60 * 60_000, end: START + 90 * 60_000 });
+    mode = "notify";
+    const scheduler = build();
+    scheduler.skip("e1");
+    await tickAt(scheduler, START - 30_000);
+    await tickAt(scheduler, START + 60 * 60_000 - 30_000);
+    expect(reminders.map((reminder) => reminder.title)).toEqual(["A"]);
+    expect(reminders[0].closed).toBe(true);
+  });
+
+  it("should report a click-to-join that couldn't open the meeting", async () => {
+    meetings({});
+    mode = "notify";
+    joinError = new Error("Couldn't open Google Chrome. Is it installed?");
+    const scheduler = build();
+    await tickAt(scheduler, START - 30_000);
+    reminders[0].join();
+    await tickAt(scheduler, START - 29_000);
+    expect(failures).toEqual(["Couldn't open Google Chrome. Is it installed?"]);
   });
 });

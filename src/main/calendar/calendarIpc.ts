@@ -1,11 +1,18 @@
 import { ipcMain } from "electron";
-import { IPC, type CalendarStatus } from "../../shared/ipc";
+import { IPC, JOIN_MODES, type CalendarStatus, type JoinMode } from "../../shared/ipc";
 import type { CalendarSync } from "./CalendarSync";
 import type { GoogleAuth } from "./GoogleAuth";
 import type { JoinScheduler } from "./JoinScheduler";
 
-/** The setting that turns automatic joining off ("false"); anything else, including unset, means on. */
+/**
+ * The setting for what happens as a meeting starts: "false" for nothing, "notify" for a click-to-join
+ * notice, and anything else, including unset, to join automatically. ("false" is what the older on/off
+ * switch stored, so it keeps meaning off.)
+ */
 export const AUTO_JOIN_SETTING = "autoJoin";
+
+/** What each join mode stores in the setting. */
+const STORED_MODE: Record<JoinMode, string | null> = { join: null, notify: "notify", off: "false" };
 
 /** What the calendar's IPC handlers act on. */
 export interface CalendarIpcDeps {
@@ -46,11 +53,11 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): void {
     deps.onChange();
     return buildCalendarStatus(deps);
   });
-  ipcMain.handle(IPC.setAutoJoin, (_event, on: unknown) => {
-    if (typeof on !== "boolean") {
-      throw new Error("Auto-join must be on or off.");
+  ipcMain.handle(IPC.setJoinMode, (_event, mode: unknown) => {
+    if (!JOIN_MODES.includes(mode as JoinMode)) {
+      throw new Error("Choose join, notify or off.");
     }
-    deps.settings.setSetting(AUTO_JOIN_SETTING, on ? null : "false");
+    deps.settings.setSetting(AUTO_JOIN_SETTING, STORED_MODE[mode as JoinMode]);
     deps.scheduler.tick();
     deps.onChange();
     return buildCalendarStatus(deps);
@@ -76,19 +83,23 @@ export function buildCalendarStatus(deps: CalendarIpcDeps): CalendarStatus {
     hasClient: deps.auth.hasClient(),
     signedIn,
     account: signedIn ? deps.sync.account() : null,
-    autoJoin: isAutoJoinOn(deps.settings),
+    joinMode: readJoinMode(deps.settings),
     ...deps.sync.status(),
     meetings: signedIn ? deps.scheduler.meetings() : [],
   };
 }
 
 /**
- * Reads the auto-join setting, which starts on.
+ * Reads what happens as a meeting starts; it starts as joining automatically.
  * @param settings The settings table.
- * @returns True unless it was turned off.
+ * @returns The join mode.
  */
-export function isAutoJoinOn(settings: { getSetting(key: string): string | null }): boolean {
-  return settings.getSetting(AUTO_JOIN_SETTING) !== "false";
+export function readJoinMode(settings: { getSetting(key: string): string | null }): JoinMode {
+  const stored = settings.getSetting(AUTO_JOIN_SETTING);
+  if (stored === "false") {
+    return "off";
+  }
+  return stored === "notify" ? "notify" : "join";
 }
 
 /**

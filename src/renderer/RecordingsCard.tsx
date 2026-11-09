@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CallRecording, RecordingsReport } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
-import { SIDE_NAMES, formatClock, groupTurns, transcriptText } from "./transcript";
+import { SIDE_NAMES, formatClock, groupTurns, transcriptText } from "../shared/transcript";
 
 /** How often the card re-reads while a call is recording or being transcribed. */
 const BUSY_REFRESH_MS = 5_000;

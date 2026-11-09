@@ -1,4 +1,4 @@
-import type { MeetingInfo, MeetingState } from "../../shared/ipc";
+import type { JoinMode, MeetingInfo, MeetingState } from "../../shared/ipc";
 import type { CalendarStore } from "./CalendarStore";
 import { shouldJoin, type CalendarEvent } from "./meetingLinks";
 
@@ -31,9 +31,12 @@ export interface Notice {
 /** What the scheduler needs, injected so tests run without Electron, Chrome or a real clock. */
 export interface JoinSchedulerDeps {
   calendar: Pick<CalendarStore, "listEvents" | "getEvent" | "recordJoin" | "getJoin" | "wasJoinedSince">;
-  autoJoin(): boolean;
+  /** Join automatically, only announce the meeting, or do nothing. */
+  joinMode(): JoinMode;
   /** Shows "Joining <title> in 30 s — click to skip"; clicking it calls onSkip. */
   notify(event: CalendarEvent, joinAt: number, onSkip: () => void): Notice;
+  /** Shows "<title> is starting — click to join"; clicking it calls onJoin. */
+  remind(event: CalendarEvent, onJoin: () => void): Notice;
   /** Opens the meeting in Zoom or Chrome. */
   join(event: CalendarEvent): Promise<void>;
   /** Tells the user a join didn't work. */
@@ -57,9 +60,15 @@ interface Plan {
  * meeting found late (app just opened, Mac just woke) gets the same 30-second notice and is joined up to
  * five minutes after its start; later than that it is left alone. Each occurrence is decided once —
  * joined, skipped or failed — and the decision is stored, so a restart never joins it twice.
+ *
+ * When the mode is "notify", nothing is opened: at the join time a notice says the meeting is starting,
+ * and clicking it joins. Which reminders were shown is kept only in memory, since the stored decisions
+ * are joined/skipped/failed; a restart in a meeting's first five minutes shows its reminder again.
  */
 export class JoinScheduler {
   private readonly plans = new Map<string, Plan>();
+  /** Click-to-join notices shown in "notify" mode, kept so they can be clicked and taken down. */
+  private readonly reminders = new Map<string, { event: CalendarEvent; notice: Notice }>();
   private timer: NodeJS.Timeout | null = null;
 
   /** @param deps The meetings, the notice, the joiner and the clock. */
@@ -82,24 +91,36 @@ export class JoinScheduler {
       plan.notice.close();
     }
     this.plans.clear();
+    for (const reminder of this.reminders.values()) {
+      reminder.notice.close();
+    }
+    this.reminders.clear();
   }
 
   /** Puts up notices and joins meetings that are due. Called every second, and after each sync. */
   tick(): void {
     const now = this.deps.now();
-    const autoJoin = this.deps.autoJoin();
+    const mode = this.deps.joinMode();
     const due = new Set<string>();
     // A tick past the notice moment, since listEvents wants meetings starting strictly before its end.
     const lookAhead = JOIN_BEFORE_START_MS + NOTICE_BEFORE_JOIN_MS + TICK_MS;
     for (const event of this.deps.calendar.listEvents(now - LATE_JOIN_LIMIT_MS, now + lookAhead)) {
-      if (!autoJoin || !shouldJoin(event) || this.deps.calendar.getJoin(event.eventId, event.start)) {
+      if (mode === "off" || !shouldJoin(event) || this.deps.calendar.getJoin(event.eventId, event.start)) {
         continue;
       }
       const tooLate = now > event.start + LATE_JOIN_LIMIT_MS || now >= event.end;
-      if (tooLate || now < event.start - JOIN_BEFORE_START_MS - NOTICE_BEFORE_JOIN_MS) {
+      if (tooLate) {
+        continue;
+      }
+      if (mode === "notify") {
+        this.remindIfDue(event, now);
         continue;
       }
       const key = planKey(event);
+      // A meeting already announced in "notify" mode isn't opened if the mode is switched to "join".
+      if (this.reminders.has(key) || now < event.start - JOIN_BEFORE_START_MS - NOTICE_BEFORE_JOIN_MS) {
+        continue;
+      }
       if (!this.plans.has(key) && this.alreadyHandled(event, now)) {
         continue;
       }
@@ -110,6 +131,26 @@ export class JoinScheduler {
       }
     }
     this.dropStalePlans(due);
+    this.dropEndedReminders(now);
+  }
+
+  /**
+   * In "notify" mode, shows a meeting's click-to-join notice once its join time has come.
+   * @param event The meeting, still undecided and not too late to join.
+   * @param now The current time.
+   */
+  private remindIfDue(event: CalendarEvent, now: number): void {
+    const key = planKey(event);
+    if (this.reminders.has(key) || now < event.start - JOIN_BEFORE_START_MS || this.alreadyHandled(event, now)) {
+      return;
+    }
+    const notice = this.deps.remind(event, () => {
+      this.joinNow(event.eventId).catch((error: unknown) => {
+        this.deps.reportFailure(event, error instanceof Error ? error.message : String(error));
+      });
+    });
+    this.reminders.set(key, { event, notice });
+    this.deps.onChange();
   }
 
   /**
@@ -190,10 +231,11 @@ export class JoinScheduler {
    */
   meetings(): MeetingInfo[] {
     const now = this.deps.now();
-    const autoJoin = this.deps.autoJoin();
+    const mode = this.deps.joinMode();
     return this.deps.calendar.listEvents(now, now + LIST_AHEAD_MS).map((event) => {
       const plan = this.plans.get(planKey(event));
-      const state = plan ? "joining" : this.stateOf(event, now, autoJoin);
+      const state = plan ? "joining" : this.stateOf(event, now, mode);
+      const willAct = state === "will-join" || state === "will-notify";
       return {
         eventId: event.eventId,
         title: event.title,
@@ -201,7 +243,7 @@ export class JoinScheduler {
         end: event.end,
         provider: event.provider,
         state,
-        joinAt: plan ? plan.joinAt : state === "will-join" ? event.start - JOIN_BEFORE_START_MS : null,
+        joinAt: plan ? plan.joinAt : willAct ? event.start - JOIN_BEFORE_START_MS : null,
       };
     });
   }
@@ -266,16 +308,32 @@ export class JoinScheduler {
   }
 
   /**
+   * Takes down click-to-join notices for meetings that have ended, since there's nothing left to join.
+   * @param now The current time.
+   */
+  private dropEndedReminders(now: number): void {
+    for (const [key, reminder] of this.reminders) {
+      if (reminder.event.end <= now) {
+        reminder.notice.close();
+        this.reminders.delete(key);
+      }
+    }
+  }
+
+  /**
    * Works out where a meeting with no notice up stands.
    * @param event The meeting.
    * @param now The current time.
-   * @param autoJoin Whether automatic joining is on.
+   * @param mode Join automatically, announce only, or do nothing.
    * @returns Its state.
    */
-  private stateOf(event: CalendarEvent, now: number, autoJoin: boolean): MeetingState {
+  private stateOf(event: CalendarEvent, now: number, mode: JoinMode): MeetingState {
     const decided = this.deps.calendar.getJoin(event.eventId, event.start);
     if (decided) {
       return decided;
+    }
+    if (this.reminders.has(planKey(event))) {
+      return "notified";
     }
     if (!event.joinUrl) {
       return "no-link";
@@ -283,10 +341,13 @@ export class JoinScheduler {
     if (!shouldJoin(event)) {
       return "declined";
     }
-    if (!autoJoin) {
+    if (mode === "off") {
       return "auto-join-off";
     }
-    return now > event.start + LATE_JOIN_LIMIT_MS ? "missed" : "will-join";
+    if (now > event.start + LATE_JOIN_LIMIT_MS) {
+      return "missed";
+    }
+    return mode === "notify" ? "will-notify" : "will-join";
   }
 }
 

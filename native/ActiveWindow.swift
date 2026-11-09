@@ -179,6 +179,18 @@ let notACall = ["ai.krisp", "org.shillington.timecenter"]
 /// capturing while native/MeetingRecorder.swift ran); counting it would keep a finished call going for ever.
 let notACallExecutables = ["replayd"]
 
+/// The Time Center.app this helper ships inside ("/Applications/Time Center.app/"), or nil when run from
+/// the source tree. Anything running from in there is Time Center itself: dictating a question opens the
+/// microphone in an Electron helper process, which has no bundle id of its own, so the check above misses
+/// it (seen 2026-11-09: dictation started a "call" recording).
+let ownAppBundle: String? = {
+    let path = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath().path
+    guard let range = path.range(of: ".app/") else {
+        return nil
+    }
+    return String(path[..<range.upperBound])
+}()
+
 /// Works out whether a call is going: some app other than those above is capturing microphone input
 /// (Core Audio's per-process input state, macOS 14+, needs no permission). Browser calls count too:
 /// Chrome's audio helper has no bundle id of its own, and was seen capturing during a real Meet call.
@@ -187,20 +199,22 @@ final class CallDetector {
     func isOnCall() -> Bool {
         return capturingProcesses().contains { pid in
             let bundleId = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
+            let path = processPath(pid)
             return pid != getpid() && !notACall.contains { bundleId == $0 || bundleId.hasPrefix($0 + ".") }
-                && !notACallExecutables.contains(executableName(pid))
+                && !notACallExecutables.contains(URL(fileURLWithPath: path).lastPathComponent)
+                && !(ownAppBundle.map { path.hasPrefix($0) } ?? false)
         }
     }
 }
 
-/// The file name of a process's executable, e.g. "meeting-recorder"; empty if macOS won't say.
-func executableName(_ pid: pid_t) -> String {
+/// The full path of a process's executable; empty if macOS won't say.
+func processPath(_ pid: pid_t) -> String {
     var buffer = [CChar](repeating: 0, count: 4096)
     let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
     if length <= 0 {
         return ""
     }
-    return URL(fileURLWithPath: String(cString: buffer)).lastPathComponent
+    return String(cString: buffer)
 }
 
 /// Lists the processes capturing microphone input, by pid.

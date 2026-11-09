@@ -1,4 +1,4 @@
-import type { TranscriptLine } from "../shared/ipc";
+import type { TranscriptLine } from "./ipc";
 
 /** One speaker's turn: their lines in a row, joined. */
 export interface Turn {

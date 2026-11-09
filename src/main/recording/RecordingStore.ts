@@ -151,6 +151,43 @@ export class RecordingStore {
       text: String(row.text),
     }));
   }
+
+  /**
+   * Lists the calls that have at least one transcript line.
+   * @returns Their ids.
+   */
+  listTranscribedIds(): Set<number> {
+    const rows = this.db.prepare("SELECT DISTINCT recording_id FROM transcript_lines").all() as { recording_id: number }[];
+    return new Set(rows.map((row) => Number(row.recording_id)));
+  }
+
+  /**
+   * Finds the calls whose transcripts contain any of some words (case ignored, anywhere in a word).
+   * @param words The words, lower case.
+   * @returns Per call: which of the words it contains, and how many lines matched.
+   */
+  searchLines(words: readonly string[]): Map<number, { words: Set<string>; lines: number }> {
+    const found = new Map<number, { words: Set<string>; lines: number }>();
+    if (words.length === 0) {
+      return found;
+    }
+    const where = words.map(() => "text LIKE ? ESCAPE '\\'").join(" OR ");
+    const rows = this.db
+      .prepare(`SELECT recording_id, text FROM transcript_lines WHERE ${where}`)
+      .all(...words.map((word) => `%${word.replace(/[\\%_]/g, "\\$&")}%`)) as { recording_id: number; text: string }[];
+    for (const row of rows) {
+      const text = row.text.toLowerCase();
+      const entry = found.get(Number(row.recording_id)) ?? { words: new Set<string>(), lines: 0 };
+      entry.lines++;
+      for (const word of words) {
+        if (text.includes(word)) {
+          entry.words.add(word);
+        }
+      }
+      found.set(Number(row.recording_id), entry);
+    }
+    return found;
+  }
 }
 
 /**

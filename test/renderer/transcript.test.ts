@@ -1,5 +1,5 @@
 import type { CallRecording, TranscriptLine } from "../../src/shared/ipc";
-import { dropEchoes, groupTurns, transcriptText } from "../../src/renderer/transcript";
+import { dropEchoes, groupTurns, transcriptText } from "../../src/shared/transcript";
 import { stateText } from "../../src/renderer/RecordingsCard";
 
 const NINE = new Date(2026, 10, 6, 9, 30).getTime();

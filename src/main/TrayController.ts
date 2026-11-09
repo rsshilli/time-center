@@ -160,6 +160,8 @@ function stateNote(meeting: MeetingInfo): string {
   const notes: Partial<Record<MeetingInfo["state"], string>> = {
     "will-join": " (joins automatically)",
     joining: " (joining in a moment)",
+    "will-notify": " (notifies you)",
+    notified: " (notified you)",
     joined: " (joined)",
     skipped: " (skipped)",
     failed: " (couldn't join)",

@@ -148,4 +148,20 @@ export const MIGRATIONS: readonly string[] = [
   -- ("2026-11-09 Yash & Ryan 1-1.m4a" in the recordings folder). Null until then; folder holds the working files.
   ALTER TABLE recordings ADD COLUMN audio_path TEXT;
   `,
+  `
+  -- Questions you asked Sonnet about your calls, and its answers. scope: 'call', 'day' or 'all'. sources is a
+  -- JSON list of the calls sent ({recordingId, start, title}); note says how they were picked, when it matters.
+  -- answer is null and error set when asking failed.
+  CREATE TABLE recording_questions (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    asked_at  TEXT NOT NULL,
+    question  TEXT NOT NULL,
+    scope     TEXT NOT NULL CHECK (scope IN ('call', 'day', 'all')),
+    sources   TEXT NOT NULL,
+    note      TEXT,
+    answer    TEXT,
+    error     TEXT
+  );
+  CREATE INDEX recording_questions_asked_at ON recording_questions (asked_at);
+  `,
 ];

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CalendarStatus, MeetingInfo } from "../shared/ipc";
+import type { CalendarStatus, JoinMode, MeetingInfo } from "../shared/ipc";
 
 /** How often the meeting list refreshes while Settings is open, so states and countdowns stay current. */
 const REFRESH_EVERY_MS = 10_000;
@@ -8,21 +8,42 @@ const REFRESH_EVERY_MS = 10_000;
 const STATE_TEXT: Record<MeetingInfo["state"], string> = {
   "will-join": "Joins automatically",
   joining: "Joining in a moment",
+  "will-notify": "Notifies you",
+  notified: "Notified you",
   joined: "Joined",
   skipped: "Skipped",
   failed: "Couldn't join",
   missed: "Missed (Mac was asleep)",
   "no-link": "No meeting link",
   declined: "You declined",
-  "auto-join-off": "Auto-join is off",
+  "auto-join-off": "Joining is off",
+};
+
+/** The choices for what happens as a meeting starts, as the drop-down shows them. */
+const JOIN_MODE_TEXT: Record<JoinMode, string> = {
+  join: "Join automatically",
+  notify: "Just notify me",
+  off: "Do nothing",
+};
+
+/** What the page says Time Center does, for each choice. */
+const LEAD_TEXT: Record<JoinMode, string> = {
+  join:
+    "Time Center reads your main Google calendar (read-only) and joins each meeting 30 seconds before it " +
+    "starts, unless you declined it. A notice shows 30 seconds before that; click it to skip.",
+  notify:
+    "Time Center reads your main Google calendar (read-only) and shows a notice 30 seconds before each " +
+    "meeting starts, unless you declined it. Click the notice to join.",
+  off: "Time Center reads your main Google calendar (read-only). Meetings aren't joined or announced; use Join now.",
 };
 
 /** The services' names as people say them. */
 const PROVIDER_TEXT = { meet: "Google Meet", zoom: "Zoom", teams: "Teams" } as const;
 
 /**
- * Google Calendar and auto-join: sign in, turn automatic joining on or off, see the coming meetings with
- * what will happen to each (skip one, or join it now).
+ * Google Calendar and auto-join: sign in, choose whether meetings are joined automatically, announced with
+ * a click-to-join notice or left alone, and see the coming meetings with what will happen to each (skip
+ * one, or join it now).
  */
 export function CalendarSettings() {
   const [status, setStatus] = useState<CalendarStatus | null>(null);
@@ -62,10 +83,7 @@ export function CalendarSettings() {
   return (
     <section className="calendar-settings">
       <h1>Meetings</h1>
-      <p className="lead">
-        Time Center reads your main Google calendar (read-only) and joins each meeting 30 seconds before it
-        starts, unless you declined it. A notice shows 30 seconds before that; click it to skip.
-      </p>
+      <p className="lead">{LEAD_TEXT[status.joinMode]}</p>
 
       <dl className="backup-status">
         <dt>Google Calendar</dt>
@@ -103,13 +121,18 @@ export function CalendarSettings() {
           </button>
         )}
         <label className="toggle">
-          <input
-            type="checkbox"
-            checked={status.autoJoin}
+          When a meeting starts
+          <select
+            value={status.joinMode}
             disabled={working}
-            onChange={(event) => void run(() => window.timeCenter.setAutoJoin(event.target.checked))}
-          />
-          Join meetings automatically
+            onChange={(event) => void run(() => window.timeCenter.setJoinMode(event.target.value as JoinMode))}
+          >
+            {(Object.keys(JOIN_MODE_TEXT) as JoinMode[]).map((mode) => (
+              <option key={mode} value={mode}>
+                {JOIN_MODE_TEXT[mode]}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
       {!status.hasClient && (
@@ -134,7 +157,7 @@ export function CalendarSettings() {
                 </td>
                 <td className={`meeting-state ${meeting.state}`}>{STATE_TEXT[meeting.state]}</td>
                 <td className="meeting-actions">
-                  {(meeting.state === "will-join" || meeting.state === "joining") && (
+                  {(meeting.state === "will-join" || meeting.state === "joining" || meeting.state === "will-notify") && (
                     <button className="secondary" disabled={working} onClick={() => void run(() => window.timeCenter.skipMeeting(meeting.eventId))}>
                       Skip
                     </button>

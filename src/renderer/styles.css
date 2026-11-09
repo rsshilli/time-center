@@ -609,6 +609,118 @@ button.link.total-name {
   font-size: 12px;
 }
 
+/* Asking about calls */
+
+.ask {
+  margin-top: 10px;
+}
+
+.ask h2 {
+  margin-top: 0;
+}
+
+.ask-input {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.ask-input textarea {
+  flex: 1;
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  resize: vertical;
+  min-height: 40px;
+}
+
+.mic-button {
+  width: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--accent);
+}
+
+.mic-button.listening {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fff;
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+.mic-button.starting,
+.mic-button.transcribing {
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+@keyframes mic-pulse {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--bad) 25%, transparent);
+  }
+}
+
+.ask-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.ask-call {
+  max-width: 320px;
+}
+
+.ask-spacer {
+  flex: 1;
+}
+
+.ask > p {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.ask-history {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  max-height: 480px;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.ask-item {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.ask-item p {
+  margin: 0;
+}
+
+.ask-question {
+  font-weight: 600;
+}
+
+.ask-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px !important;
+}
+
+.ask-answer {
+  margin-top: 6px !important;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
 /* Recorded calls */
 
 .recordings {
@@ -801,6 +913,7 @@ button.link.total-name {
 }
 
 .meeting-state.will-join,
+.meeting-state.will-notify,
 .meeting-state.joined {
   color: var(--ok);
 }

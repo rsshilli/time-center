@@ -4,6 +4,9 @@ import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedroc
 /** Haiku 4.5 on Amazon Bedrock, through the US cross-region inference profile. */
 export const BEDROCK_HAIKU_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
 
+/** Sonnet 5.5 on Amazon Bedrock, for questions about calls (probed 2026-11-09: answers on this account). */
+export const BEDROCK_SONNET_MODEL = "us.anthropic.claude-sonnet-5-5";
+
 /** Used when the shell sets no AWS_REGION. */
 const DEFAULT_REGION = "us-east-1";
 
@@ -33,7 +36,7 @@ export interface HaikuClient {
 }
 
 /**
- * Calls Claude Haiku on Amazon Bedrock with the AWS keys your `~/.bashrc` exports. The app is opened from
+ * Calls Claude on Amazon Bedrock (Haiku unless told otherwise) with the AWS keys your `~/.bashrc` exports. The app is opened from
  * Finder, so it never runs `.bashrc` itself: the first call asks your shell for the keys, once. Without
  * them it falls back to the AWS SDK's usual places (`~/.aws`).
  */
@@ -41,8 +44,14 @@ export class BedrockHaiku implements HaikuClient {
   private client: Promise<BedrockRuntimeClient> | null = null;
   private source: string | null = null;
 
-  /** @param readKeys Reads the keys; your shell's by default, injected for tests. */
-  constructor(private readonly readKeys: () => Promise<AwsKeys | null> = readShellAwsKeys) {}
+  /**
+   * @param readKeys Reads the keys; your shell's by default, injected for tests.
+   * @param modelId The Bedrock model to call: Haiku by default, Sonnet for questions about calls.
+   */
+  constructor(
+    private readonly readKeys: () => Promise<AwsKeys | null> = readShellAwsKeys,
+    private readonly modelId: string = BEDROCK_HAIKU_MODEL,
+  ) {}
 
   /**
    * Sends a request and returns the parsed reply.
@@ -54,7 +63,7 @@ export class BedrockHaiku implements HaikuClient {
     try {
       const response = await client.send(
         new InvokeModelCommand({
-          modelId: BEDROCK_HAIKU_MODEL,
+          modelId: this.modelId,
           contentType: "application/json",
           accept: "application/json",
           body: JSON.stringify(body),

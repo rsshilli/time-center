@@ -1,9 +1,18 @@
 import { ipcMain } from "electron";
-import { IPC, type CallRecording, type RecordingsReport } from "../../shared/ipc";
+import {
+  CALL_QUESTION_SCOPES,
+  IPC,
+  type CallQuestion,
+  type CallQuestionRequest,
+  type CallQuestionScope,
+  type CallRecording,
+  type RecordingsReport,
+} from "../../shared/ipc";
 import { localDayBounds } from "../activity/dayReport";
 import type { CalendarEvent } from "../calendar/meetingLinks";
 import { assertMoment, assertRowId } from "../ipcHandlers";
-import type { RecordingStore, StoredRecording } from "./RecordingStore";
+import { bestMeeting } from "./callMeeting";
+import type { RecordingStore } from "./RecordingStore";
 import type { Transcriber } from "./Transcriber";
 
 /** What the recordings requests are answered from. */
@@ -16,8 +25,20 @@ export interface RecordingIpcDependencies {
   showInFinder(path: string): void;
   /** How many chunks in a recording's folder whisper couldn't read. */
   countUnread(folder: string): number;
+  /** Asks Sonnet a checked question and saves it with the answer. */
+  ask(request: CallQuestionRequest): Promise<CallQuestion>;
+  /** The questions asked before, newest first. */
+  listQuestions(): CallQuestion[];
+  /** Turns dictated speech (WAV bytes) into text. */
+  dictate(wav: Uint8Array): Promise<string>;
   now(): number;
 }
+
+/** The longest question accepted, typed or dictated. */
+export const MAX_QUESTION_CHARS = 2_000;
+
+/** The biggest dictation accepted: a bit over two minutes of 16 kHz 16-bit mono. */
+export const MAX_DICTATION_BYTES = 5_000_000;
 
 /**
  * Answers the Today screen's requests for the day's calls and their transcripts.
@@ -33,6 +54,48 @@ export function registerRecordingIpc(deps: RecordingIpcDependencies): void {
     // The named file once it exists; until then (still mixing) the working folder.
     deps.showInFinder(recording.audioPath ?? recording.folder);
   });
+  ipcMain.handle(IPC.askAboutCalls, (_event, request: unknown) => deps.ask(assertQuestionRequest(request)));
+  ipcMain.handle(IPC.getCallQuestions, () => deps.listQuestions());
+  ipcMain.handle(IPC.transcribeDictation, (_event, wav: unknown) => deps.dictate(assertDictation(wav)));
+}
+
+/**
+ * Checks a question sent by the renderer.
+ * @param value What it sent.
+ * @returns The request, typed.
+ */
+export function assertQuestionRequest(value: unknown): CallQuestionRequest {
+  const request = value as Partial<CallQuestionRequest> | null;
+  if (typeof request !== "object" || request === null) {
+    throw new Error("Not a question.");
+  }
+  if (typeof request.question !== "string" || request.question.length > MAX_QUESTION_CHARS) {
+    throw new Error(`A question can be up to ${MAX_QUESTION_CHARS} characters.`);
+  }
+  if (!CALL_QUESTION_SCOPES.includes(request.scope as CallQuestionScope)) {
+    throw new Error("Choose this call, this day or all calls.");
+  }
+  const recordingId = request.recordingId === null || request.recordingId === undefined ? null : assertRowId(request.recordingId);
+  if (request.scope === "call" && recordingId === null) {
+    throw new Error("Choose a call to ask about.");
+  }
+  return { question: request.question, scope: request.scope as CallQuestionScope, at: assertMoment(request.at), recordingId };
+}
+
+/**
+ * Checks dictated audio sent by the renderer: a WAV file, not too big.
+ * @param value What it sent.
+ * @returns The bytes.
+ */
+export function assertDictation(value: unknown): Uint8Array {
+  const bytes = value instanceof ArrayBuffer ? new Uint8Array(value) : value instanceof Uint8Array ? value : null;
+  if (!bytes || bytes.byteLength < 44 || new TextDecoder().decode(bytes.subarray(0, 4)) !== "RIFF") {
+    throw new Error("That recording wasn't a WAV file.");
+  }
+  if (bytes.byteLength > MAX_DICTATION_BYTES) {
+    throw new Error("That recording is too long; keep a question under two minutes.");
+  }
+  return bytes;
 }
 
 /**
@@ -41,7 +104,10 @@ export function registerRecordingIpc(deps: RecordingIpcDependencies): void {
  * @param at A moment in the day.
  * @returns The report.
  */
-export function buildRecordingsReport(deps: RecordingIpcDependencies, at: number): RecordingsReport {
+export function buildRecordingsReport(
+  deps: Pick<RecordingIpcDependencies, "store" | "transcriber" | "listMeetings" | "countUnread" | "now">,
+  at: number,
+): RecordingsReport {
   const { dayStart, dayEnd } = localDayBounds(at);
   const meetings = deps.listMeetings(dayStart, dayEnd).filter((meeting) => meeting.response !== "declined");
   const recordings = deps.store.listRecordings(dayStart, dayEnd).map(
@@ -59,38 +125,4 @@ export function buildRecordingsReport(deps: RecordingIpcDependencies, at: number
     }),
   );
   return { recordings, transcriberProblem: deps.transcriber.currentProblem() };
-}
-
-/**
- * Finds the meeting a call overlapped most.
- * @param recording The call.
- * @param meetings The day's meetings.
- * @param now The current time, the end of a call still going.
- * @returns The meeting, or null when none overlapped.
- */
-export function bestMeeting(recording: StoredRecording, meetings: CalendarEvent[], now: number): CalendarEvent | null {
-  // A real meeting (other people, or a call link) beats a block you put in for yourself ("Pay credit card!").
-  const real = meetings.filter((meeting) => meeting.attendees.length > 0 || meeting.provider !== null);
-  return mostOverlapping(recording, real, now) ?? mostOverlapping(recording, meetings, now);
-}
-
-/**
- * Finds the meeting that overlaps a call the longest.
- * @param recording The call.
- * @param meetings The candidates.
- * @param now The current time, the end of a call still going.
- * @returns The meeting, or null when none overlapped.
- */
-function mostOverlapping(recording: StoredRecording, meetings: CalendarEvent[], now: number): CalendarEvent | null {
-  const end = recording.end ?? now;
-  let best: CalendarEvent | null = null;
-  let bestOverlap = 0;
-  for (const meeting of meetings) {
-    const overlap = Math.min(end, meeting.end) - Math.max(recording.start, meeting.start);
-    if (overlap > bestOverlap) {
-      best = meeting;
-      bestOverlap = overlap;
-    }
-  }
-  return best;
 }

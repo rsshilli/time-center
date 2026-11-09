@@ -4,8 +4,15 @@ A Mac menu-bar app that shows where your day went. It joins your meetings on tim
 transcribes your calls.
 
 Everything stays on your Mac: the activity log, screenshots, recordings and transcripts. Nothing leaves
-it except two things, and only if you turn them on: a weekly backup of the database to your own S3
-bucket, and meeting titles sent to Claude to sort them into types.
+it except three things, and only when you set them up or use them: a weekly backup of the database to
+your own S3 bucket, meeting titles sent to Claude to sort them into types, and the transcripts of the
+calls you ask Claude a question about.
+
+![The Today tab: a timeline of the day by app, and time per category, app, project, website and meeting](docs/screenshots/today.png)
+
+![The Recordings tab: questions about calls answered by Claude, and a call's transcript](docs/screenshots/recordings.png)
+
+<sub>Screenshots use a made-up day.</sub>
 
 ## What it does
 
@@ -13,7 +20,9 @@ bucket, and meeting titles sent to Claude to sort them into types.
   sorted into categories such as "Code review" or "Email". Click any stretch to see the screenshot taken
   then. To add time the Mac couldn't see, such as a call on your phone or a drive, drag across the timeline.
 - **Joins meetings.** It reads your Google Calendar and opens each meeting 30 seconds before it starts.
-  Zoom meetings open in the Zoom app; Google Meet and Teams open in Chrome, where you click Join.
+  Zoom meetings open in the Zoom app; Google Meet and Teams open in Chrome, where you click Join. If you'd
+  rather not have meetings opened for you, set **Settings → Meetings → When a meeting starts** to "Just
+  notify me" (a notice you click to join) or "Do nothing".
 - **Records calls.** Whenever another app is using the microphone (Zoom, Meet, Teams, Slack…), the call is
   recorded, and a red dot shows
   on the menu-bar icon. Each call becomes one file, such as `2026-11-09 Weekly sync.m4a`.
@@ -21,6 +30,11 @@ bucket, and meeting titles sent to Claude to sort them into types.
   at low priority, and nothing is uploaded.
 - **Recordings tab.** Your calls for the day, each with its transcript, a Copy button and a link to the
   audio file. Pick a day in either the Today tab or the Recordings tab, and the other tab shows the same day.
+- **Ask about your calls.** At the top of the Recordings tab, type a question, or click the mic to say
+  it (whisper turns it into text on your Mac). Ask about one call (even one still going), the picked
+  day's calls, or all your calls. For all calls, the app searches the transcripts for your question's
+  words and sends only the calls that match. Claude Sonnet answers, and your questions and answers are
+  kept below the box.
 - **Settings.** Category rules (with a filter box to find one), apps to ignore, your calendar, meeting
   types and the weekly backup.
 
@@ -41,8 +55,8 @@ bucket, and meeting titles sent to Claude to sort them into types.
 - [Homebrew](https://brew.sh), for whisper.cpp: `brew install whisper-cpp`.
 - Google Chrome, for Meet and Teams, and to read the address of the tab you're on.
 - **Optional:** a Google Cloud OAuth client, for calendar joining (see below).
-- **Optional:** AWS credentials, for backups to S3 and for sorting meetings into types with Claude on
-  Amazon Bedrock.
+- **Optional:** AWS credentials, for backups to S3, and for Claude on Amazon Bedrock (sorting meetings
+  into types, answering questions about your calls).
 
 ## Install
 
@@ -71,7 +85,7 @@ System Settings:
 |------------|-----|
 | Accessibility | Reads the title of the window in front |
 | Screen Recording | Takes the once-a-minute screenshots and records the other side of a call |
-| Microphone | Records your side of a call |
+| Microphone | Records your side of a call, and hears questions you dictate |
 | Control Google Chrome | Reads the address of the Chrome tab you're on |
 
 macOS only applies Screen Recording after the app restarts; the Permissions tab says so when that's needed.
@@ -105,12 +119,17 @@ can also enter a KMS key. Once a week the app uploads a copy of the database, an
 week the Mac was off. To move to a new Mac, use **Restore latest backup…** on the same page. Screenshots
 and audio aren't included.
 
-### Meeting types (Claude on Bedrock)
+### Claude on Amazon Bedrock (meeting types and questions)
 
-Under **Settings → Meeting types**, the app can ask Claude Haiku 4.5 on Amazon Bedrock to label each
-meeting as a one-on-one, a daily stand-up, management, an architecture or product review, a customer call,
-or other. It sends only the meeting's title and attendee
-list. It uses the AWS keys your login shell exports (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
+Two features use Claude on Amazon Bedrock:
+
+- **Meeting types.** Under **Settings → Meeting types**, Claude Haiku 4.5 labels each meeting as a
+  one-on-one, a daily stand-up, management, an architecture or product review, a customer call, or other.
+  It sends only the meeting's title and attendee list.
+- **Questions about calls.** Claude Sonnet 5.5 answers what you ask on the Recordings tab. It sends the
+  transcripts of the calls your question covers, with their meeting titles and times.
+
+Both use the AWS keys your login shell exports (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
 `AWS_REGION`, which defaults to `us-east-1`). The account needs Bedrock access to Anthropic models.
 
 ## Where your data lives
@@ -119,7 +138,7 @@ All in `~/Library/Application Support/Time Center/`:
 
 | Path | What |
 |------|------|
-| `time-center.db` | The SQLite database: activity, meetings, rules, transcripts |
+| `time-center.db` | The SQLite database: activity, meetings, rules, transcripts, your questions and answers |
 | `screenshots/YYYY-MM-DD/` | Once-a-minute screenshots, kept 30 days |
 | `recordings/` | One `.m4a` per call, kept 30 days |
 | `models/` | The Whisper speech model |

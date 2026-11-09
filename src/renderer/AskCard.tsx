@@ -1,0 +1,185 @@
+import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
+import type { CallQuestion, CallQuestionScope, CallRecording } from "../shared/ipc";
+import { readableError } from "./CalendarSettings";
+import { startOfDay } from "./day";
+import { DictationButton } from "./DictationButton";
+import { formatClock, formatDay } from "./format";
+
+/** How often the call picker re-reads the day's calls. */
+const CALLS_REFRESH_MS = 15_000;
+
+/** Each scope's name in the picker. */
+const SCOPE_TEXT: Record<CallQuestionScope, string> = { call: "This call", day: "This day", all: "All calls" };
+
+/**
+ * The question box on the Recordings tab: ask Sonnet about one call, the picked day's calls, or every call
+ * that mentions your words. Type or dictate the question; past questions and answers are listed below it.
+ * @param props.at A moment in the picked day.
+ */
+export function AskCard({ at }: { at: number }) {
+  const [question, setQuestion] = useState("");
+  const [scope, setScope] = useState<CallQuestionScope>("call");
+  const [calls, setCalls] = useState<CallRecording[]>([]);
+  const [recordingId, setRecordingId] = useState<number | null>(null);
+  const [history, setHistory] = useState<CallQuestion[]>([]);
+  const [asking, setAsking] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    void window.timeCenter
+      .getCallQuestions()
+      .then(setHistory)
+      .catch((caught: unknown) => setProblem(`Couldn't load your past questions: ${readableError(caught)}`));
+  }, []);
+
+  /** Reads the picked day's calls for the call picker, keeping the chosen call if it's still there. */
+  const loadCalls = useCallback(async () => {
+    try {
+      const day = await window.timeCenter.getRecordings(at);
+      const withWords = day.recordings.filter((recording) => recording.lines.length > 0);
+      setCalls(withWords);
+      setRecordingId((chosen) =>
+        withWords.some((recording) => recording.id === chosen) ? chosen : (withWords.at(-1)?.id ?? null),
+      );
+    } catch (caught) {
+      setProblem(`Couldn't load the calls: ${readableError(caught)}`);
+    }
+  }, [at]);
+
+  useEffect(() => {
+    void loadCalls();
+    // Keeps a call that starts (or gets its first words) while the tab is open in the picker.
+    const timer = setInterval(() => void loadCalls(), CALLS_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [loadCalls]);
+
+  const scopeEmpty = scope !== "all" && calls.length === 0;
+  const canAsk = question.trim() !== "" && !asking && !scopeEmpty && (scope !== "call" || recordingId !== null);
+
+  /** Sends the question and puts the saved answer at the top of the list. */
+  const ask = async () => {
+    if (!canAsk) {
+      return;
+    }
+    setAsking(true);
+    setProblem(null);
+    try {
+      const saved = await window.timeCenter.askAboutCalls({
+        question,
+        scope,
+        at,
+        recordingId: scope === "call" ? recordingId : null,
+      });
+      setHistory((past) => [saved, ...past]);
+      if (saved.answer !== null) {
+        setQuestion("");
+      }
+    } catch (caught) {
+      setProblem(readableError(caught));
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  /** ⌘↩ (or Ctrl+↩) asks. */
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      void ask();
+    }
+  };
+
+  /** Adds dictated words to whatever is already typed. */
+  const addDictation = (text: string) => {
+    setQuestion((typed) => (typed.trim() === "" ? text : `${typed.trimEnd()} ${text}`));
+  };
+
+  return (
+    <div className="card ask">
+      <h2>Ask about your calls</h2>
+      <div className="ask-input">
+        <textarea
+          value={question}
+          rows={2}
+          placeholder="e.g. What did I say I'd send Dana?"
+          aria-label="Your question"
+          onChange={(event) => setQuestion(event.target.value)}
+          onKeyDown={onKeyDown}
+          onFocus={() => void loadCalls()}
+        />
+        <DictationButton onText={addDictation} onError={setProblem} disabled={asking} />
+      </div>
+      <div className="ask-controls">
+        <label>
+          About{" "}
+          <select value={scope} onChange={(event) => setScope(event.target.value as CallQuestionScope)}>
+            {(Object.keys(SCOPE_TEXT) as CallQuestionScope[]).map((value) => (
+              <option key={value} value={value}>
+                {SCOPE_TEXT[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {scope === "call" && calls.length > 0 && (
+          <select
+            className="ask-call"
+            aria-label="Which call"
+            value={recordingId ?? ""}
+            onChange={(event) => setRecordingId(Number(event.target.value))}
+          >
+            {calls.map((call) => (
+              <option key={call.id} value={call.id}>
+                {formatClock(call.start)} {call.meetingTitle ?? "Call"}
+                {call.end === null ? " (now)" : ""}
+              </option>
+            ))}
+          </select>
+        )}
+        <span className="ask-spacer" />
+        <button disabled={!canAsk} onClick={() => void ask()}>
+          {asking ? "Asking…" : "Ask"}
+        </button>
+      </div>
+      {scopeEmpty && <p className="muted">No transcribed calls on this day. Pick "All calls" to ask about older ones.</p>}
+      {scope === "all" && <p className="muted">Searches your calls for the question's words and sends the best matches.</p>}
+      {asking && <p className="muted">Sonnet is reading the transcripts…</p>}
+      {problem && <p className="error">{problem}</p>}
+      {history.length > 0 && (
+        <ul className="ask-history">
+          {history.map((item) => (
+            <QuestionItem key={item.id} item={item} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One past question: what you asked, which calls it covered, and the answer.
+ * @param props.item The saved question.
+ */
+function QuestionItem({ item }: { item: CallQuestion }) {
+  return (
+    <li className="ask-item">
+      <p className="ask-question">{item.question}</p>
+      <p className="ask-meta" title={item.sources.map((source) => sourceText(source)).join("\n")}>
+        {formatDay(startOfDay(item.askedAt), startOfDay(Date.now()))}, {formatClock(item.askedAt)} · {SCOPE_TEXT[item.scope]} ·{" "}
+        {item.sources.length === 1 ? sourceText(item.sources[0]) : `${item.sources.length} calls`}
+      </p>
+      {item.note && <p className="ask-meta">{item.note}</p>}
+      {item.answer !== null && <p className="ask-answer">{item.answer}</p>}
+      {item.error !== null && <p className="error">Couldn't get an answer: {item.error}</p>}
+    </li>
+  );
+}
+
+/**
+ * Names a call a question covered.
+ * @param source The call.
+ * @returns e.g. "Northwind onboarding, Mon 2:00 PM".
+ */
+function sourceText(source: CallQuestion["sources"][number]): string {
+  const day = new Date(source.start).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  return `${source.title ?? "Call"}, ${day} ${formatClock(source.start)}`;
+}

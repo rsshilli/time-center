@@ -1,4 +1,4 @@
-import { parseWhisperJson } from "../../src/main/recording/whisper";
+import { cleanDictation, parseWhisperJson } from "../../src/main/recording/whisper";
 
 describe("parseWhisperJson", () => {
   it("should read the segments of whisper-cli's -oj output", () => {
@@ -19,5 +19,12 @@ describe("parseWhisperJson", () => {
 
   it("should give no segments when whisper heard nothing", () => {
     expect(parseWhisperJson("{}")).toEqual([]);
+  });
+});
+
+describe("cleanDictation", () => {
+  it("should drop whisper's sound tags and extra spaces from a dictated question", () => {
+    expect(cleanDictation(" [BLANK_AUDIO]  What did Dana  ask for? [Music] ")).toBe("What did Dana ask for?");
+    expect(cleanDictation("[BLANK_AUDIO]")).toBe("");
   });
 });

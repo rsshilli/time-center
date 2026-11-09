@@ -13,11 +13,11 @@ import {
 import { CalendarClient } from "./calendar/CalendarClient";
 import { CalendarStore } from "./calendar/CalendarStore";
 import { CalendarSync } from "./calendar/CalendarSync";
-import { isAutoJoinOn, registerCalendarIpc } from "./calendar/calendarIpc";
+import { readJoinMode, registerCalendarIpc } from "./calendar/calendarIpc";
 import { GoogleAuth, builtInGoogleClient } from "./calendar/GoogleAuth";
 import { JoinScheduler, type Notice } from "./calendar/JoinScheduler";
 import { MeetingJoiner, openInChrome } from "./calendar/MeetingJoiner";
-import { BedrockHaiku } from "./calendar/BedrockHaiku";
+import { BEDROCK_SONNET_MODEL, BedrockHaiku } from "./calendar/BedrockHaiku";
 import { MeetingTyper } from "./calendar/MeetingTyper";
 import { registerMeetingTypeIpc } from "./calendar/meetingTypeIpc";
 import type { CalendarEvent } from "./calendar/meetingLinks";
@@ -39,10 +39,13 @@ import {
   nameRecordingAudio,
   recoverRecordings,
 } from "./recording/recordingFiles";
-import { bestMeeting, registerRecordingIpc } from "./recording/recordingIpc";
+import { bestMeeting } from "./recording/callMeeting";
+import { registerRecordingIpc } from "./recording/recordingIpc";
 import { RecordingStore, type StoredRecording } from "./recording/RecordingStore";
 import { Transcriber } from "./recording/Transcriber";
-import { cancelWhisper, prepareWhisper, runWhisper } from "./recording/whisper";
+import { cancelWhisper, prepareWhisper, runWhisper, transcribeSpeech } from "./recording/whisper";
+import { CallQuestionStore } from "./recording/CallQuestionStore";
+import { askAboutCalls } from "./recording/callQuestions";
 import { cleanUpScreenshots } from "./screenshots/cleanUpScreenshots";
 import { captureDisplays, sampleCpuPercent } from "./screenshots/platform";
 import { ScreenCapturer } from "./screenshots/ScreenCapturer";
@@ -52,6 +55,9 @@ import { SecretStore } from "./store/SecretStore";
 import { Store } from "./store/Store";
 import { TrayController } from "./TrayController";
 import { WindowManager, type Screen } from "./WindowManager";
+
+/** How many past questions about calls the Recordings tab shows. */
+const QUESTIONS_SHOWN = 30;
 
 /** How long quitting waits for a backup in progress before giving up on it. */
 const QUIT_WAIT_MS = 30_000;
@@ -81,6 +87,8 @@ async function main(): Promise<void> {
   /** The ignored-apps list as saved in Settings, read fresh each time it's needed. */
   const ignoredApps = () => parseIgnoredApps(store.getSetting(IGNORED_APPS_SETTING));
   const recordings = new RecordingStore(store.db);
+  const callQuestions = new CallQuestionStore(store.db);
+  const sonnet = new BedrockHaiku(undefined, BEDROCK_SONNET_MODEL);
   const transcriber = createTranscriber(recordings);
   // Finds whisper and the model (downloading it the first time) now, so a problem shows before the first call.
   void transcriber.prepareAhead();
@@ -196,6 +204,22 @@ async function main(): Promise<void> {
       }
     },
     countUnread: countUnreadChunks,
+    ask: (request) =>
+      askAboutCalls(
+        {
+          recordings,
+          questions: callQuestions,
+          listMeetings: (from, to) => calendar.store.listTypedEvents(from, to),
+          claude: sonnet,
+          now: () => Date.now(),
+        },
+        request,
+      ),
+    listQuestions: () => callQuestions.listQuestions(QUESTIONS_SHOWN),
+    dictate: async (wav) => {
+      const { whisper, model } = await prepareWhisper(join(app.getPath("userData"), "models"), false);
+      return transcribeSpeech(whisper, model, wav, join(app.getPath("temp"), "time-center-dictation"));
+    },
     now: () => Date.now(),
   });
   handleScreenshotScheme(activity);
@@ -352,8 +376,9 @@ function createCalendar(store: Store, onChange: () => void) {
   });
   const joins: JoinScheduler = new JoinScheduler({
     calendar: calendarStore,
-    autoJoin: () => auth.isSignedIn() && isAutoJoinOn(store),
+    joinMode: () => (auth.isSignedIn() ? readJoinMode(store) : "off"),
     notify: showJoinNotice,
+    remind: showJoinReminder,
     join: (event) => joiner.join(event),
     reportFailure: (event, error) => showJoinFailure(`${event.title}: ${error}`),
     onChange,
@@ -378,6 +403,22 @@ function showJoinNotice(event: CalendarEvent, joinAt: number, onSkip: () => void
     body: title,
   });
   notice.on("click", onSkip);
+  notice.show();
+  return { close: () => notice.close() };
+}
+
+/**
+ * Shows the macOS notice that a meeting is starting, for when meetings aren't joined automatically;
+ * clicking it joins. The scheduler holds the handle, which keeps the click working.
+ * @param event The meeting.
+ * @param onJoin Joins the meeting.
+ * @returns A handle that takes the notice down.
+ */
+function showJoinReminder(event: CalendarEvent, onJoin: () => void): Notice {
+  const title = event.title.length > 80 ? `${event.title.slice(0, 79)}…` : event.title;
+  const starting = event.start > Date.now() ? "is about to start" : "has started";
+  const notice = new Notification({ title: `A meeting ${starting} — click to join`, body: title });
+  notice.on("click", onJoin);
   notice.show();
   return { close: () => notice.close() };
 }

@@ -72,7 +72,6 @@ describe("RecordingStore", () => {
         store: recordings,
         transcriber: { waiting: () => 2, currentProblem: () => null },
         listMeetings: () => meetings,
-        showInFinder: () => {},
         countUnread: () => 0,
         now: () => NOON + 20 * MIN,
       },
