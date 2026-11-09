@@ -73,6 +73,7 @@ export class TrayController {
         ...meetingItems,
         { type: "separator" },
         { label: "Today…", click: () => this.deps.windows.show("dashboard") },
+        { label: "Recordings…", click: () => this.deps.windows.show("recordings") },
         { label: "Settings…", click: () => this.deps.windows.show("settings") },
         { label: "Permissions…", click: () => this.deps.windows.show("permissions") },
         { type: "separator" },

@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { RecordingStore } from "../../src/main/recording/RecordingStore";
 import {
   INTERRUPTED,
+  audioFileName,
   cleanUpRecordings,
   countUnreadChunks,
+  nameRecordingAudio,
   recoverRecordings,
 } from "../../src/main/recording/recordingFiles";
 import { buildRecordingsReport } from "../../src/main/recording/recordingIpc";
@@ -15,6 +17,16 @@ import { Store } from "../../src/main/store/Store";
 
 const NOON = new Date(2026, 10, 6, 12).getTime();
 const MIN = 60_000;
+
+describe("audioFileName", () => {
+  it("should use the local date and a title safe for Finder, or Call without a meeting", () => {
+    expect(audioFileName(NOON, "Yash & Ryan 1-1")).toBe("2026-11-06 Yash & Ryan 1-1");
+    expect(audioFileName(NOON, " Q4: plan / budget\n")).toBe("2026-11-06 Q4- plan - budget");
+    expect(audioFileName(NOON, "...hidden")).toBe("2026-11-06 hidden");
+    expect(audioFileName(NOON, null)).toBe("2026-11-06 Call");
+    expect(audioFileName(NOON, "x".repeat(300))).toHaveLength(11 + 120);
+  });
+});
 
 describe("RecordingStore", () => {
   let store: Store;
@@ -46,12 +58,14 @@ describe("RecordingStore", () => {
     expect(recordings.listLines(id).map((line) => line.text)).toEqual(["First", "Second"]);
   });
 
-  it("should list a call still recording on its day, and name it after the meeting it overlapped most", () => {
+  it("should list a call still recording on its day, named after the real meeting it overlapped most", () => {
     recordings.insertRecording(NOON, "/r/1");
+    const guest = [{ email: "yash@example.com", name: "Yash" }];
     const meetings = [
-      { title: "Stand-up", start: NOON - 30 * MIN, end: NOON + 2 * MIN, response: "accepted" },
-      { title: "1-1", start: NOON, end: NOON + 30 * MIN, response: "accepted" },
-      { title: "Declined", start: NOON, end: NOON + 60 * MIN, response: "declined" },
+      { title: "Stand-up", start: NOON - 30 * MIN, end: NOON + 2 * MIN, response: "accepted", attendees: guest, provider: null },
+      { title: "1-1", start: NOON + 5 * MIN, end: NOON + 30 * MIN, response: "accepted", attendees: guest, provider: null },
+      { title: "Pay credit card!", start: NOON, end: NOON + 60 * MIN, response: "accepted", attendees: [], provider: null },
+      { title: "Declined", start: NOON, end: NOON + 60 * MIN, response: "declined", attendees: guest, provider: "zoom" },
     ] as CalendarEvent[];
     const report = buildRecordingsReport(
       {
@@ -77,7 +91,11 @@ describe("RecordingStore", () => {
     writeFileSync(join(folder, "chunks", "me-1794008490283-2.wav.failed"), "x");
     const id = recordings.insertRecording(NOON, folder);
     const queued: AudioChunk[] = [];
-    await recoverRecordings(recordings, { add: (_id, chunk) => queued.push(chunk) });
+    const named: number[] = [];
+    await recoverRecordings(recordings, { add: (_id, chunk) => queued.push(chunk) }, async (recording) => {
+      named.push(recording.id);
+    });
+    expect(named).toEqual([id]);
     const recording = recordings.getRecording(id)!;
     expect(recording.end).toBeGreaterThan(NOON);
     expect(recording.error).toBe(INTERRUPTED);
@@ -99,6 +117,31 @@ describe("RecordingStore", () => {
     expect(existsSync(newFolder)).toBe(true);
     expect(recordings.getRecording(old)!.audioDeleted).toBe(true);
     expect(recordings.listLines(old)).toHaveLength(1);
+  });
+
+  it("should move the mixed file out as '<date> <meeting>.m4a', adding (2) when that name is taken", async () => {
+    const recordingsDir = join(dir, "recordings");
+    /**
+     * A finished call whose recorder has written its mixed file.
+     * @param name The working folder's name.
+     * @returns The call as stored.
+     */
+    const finishedCall = (name: string) => {
+      const folder = join(recordingsDir, ".work", name);
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, "call.m4a"), "audio");
+      const id = recordings.insertRecording(NOON, folder);
+      recordings.finishRecording(id, NOON + 30 * MIN);
+      return recordings.getRecording(id)!;
+    };
+    const first = await nameRecordingAudio(recordings, finishedCall("a"), "Yash & Ryan 1-1", recordingsDir);
+    const second = await nameRecordingAudio(recordings, finishedCall("b"), "Yash & Ryan 1-1", recordingsDir);
+    expect(first).toBe(join(recordingsDir, "2026-11-06 Yash & Ryan 1-1.m4a"));
+    expect(second).toBe(join(recordingsDir, "2026-11-06 Yash & Ryan 1-1 (2).m4a"));
+    expect(existsSync(first!)).toBe(true);
+    expect(existsSync(join(recordingsDir, ".work", "a"))).toBe(false);
+    expect(recordings.getRecording(1)!.audioPath).toBe(first);
+    expect(await nameRecordingAudio(recordings, recordings.getRecording(1)!, "Again", recordingsDir)).toBeNull();
   });
 
   it("should keep an old call's audio while chunks of it still wait for whisper", async () => {

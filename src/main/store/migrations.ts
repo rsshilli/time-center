@@ -143,4 +143,9 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX transcript_lines_recording ON transcript_lines (recording_id, started_at);
   `,
+  `
+  -- The call's one audio file once both sides are mixed and it's named after the meeting
+  -- ("2026-11-09 Yash & Ryan 1-1.m4a" in the recordings folder). Null until then; folder holds the working files.
+  ALTER TABLE recordings ADD COLUMN audio_path TEXT;
+  `,
 ];

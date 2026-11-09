@@ -7,7 +7,10 @@ export interface StoredRecording {
   start: number;
   /** Null while recording. */
   end: number | null;
+  /** The working folder: chunks for whisper, and the audio until it's named. */
   folder: string;
+  /** The call's named audio file, once both sides are mixed; null before that. */
+  audioPath: string | null;
   mic: boolean;
   error: string | null;
   audioDeleted: boolean;
@@ -93,6 +96,15 @@ export class RecordingStore {
   }
 
   /**
+   * Keeps where a call's named audio file is.
+   * @param id The recording.
+   * @param path The file.
+   */
+  setAudioPath(id: number, path: string): void {
+    this.db.prepare("UPDATE recordings SET audio_path = ? WHERE id = ?").run(path, id);
+  }
+
+  /**
    * Notes that a recording's audio files were deleted (past the 30-day keep); its transcript stays.
    * @param id The recording.
    * @param at When.
@@ -152,6 +164,7 @@ function mapRecording(row: Record<string, unknown>): StoredRecording {
     start: Date.parse(String(row.started_at)),
     end: row.ended_at === null || row.ended_at === undefined ? null : Date.parse(String(row.ended_at)),
     folder: String(row.folder),
+    audioPath: row.audio_path === null || row.audio_path === undefined ? null : String(row.audio_path),
     mic: Number(row.mic) === 1,
     error: row.error === null || row.error === undefined ? null : String(row.error),
     audioDeleted: row.audio_deleted_at !== null && row.audio_deleted_at !== undefined,

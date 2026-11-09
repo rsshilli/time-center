@@ -12,7 +12,7 @@ export interface RecordingIpcDependencies {
   transcriber: Pick<Transcriber, "waiting" | "currentProblem">;
   /** The calendar's meetings in a time range, to name each call. */
   listMeetings(from: number, to: number): CalendarEvent[];
-  /** Shows a file or folder in Finder. */
+  /** Shows a file (selected in its folder) or a folder in Finder. */
   showInFinder(path: string): void;
   /** How many chunks in a recording's folder whisper couldn't read. */
   countUnread(folder: string): number;
@@ -30,7 +30,8 @@ export function registerRecordingIpc(deps: RecordingIpcDependencies): void {
     if (!recording || recording.audioDeleted) {
       throw new Error("That call's audio is no longer on this Mac.");
     }
-    deps.showInFinder(recording.folder);
+    // The named file once it exists; until then (still mixing) the working folder.
+    deps.showInFinder(recording.audioPath ?? recording.folder);
   });
 }
 
@@ -68,6 +69,19 @@ export function buildRecordingsReport(deps: RecordingIpcDependencies, at: number
  * @returns The meeting, or null when none overlapped.
  */
 export function bestMeeting(recording: StoredRecording, meetings: CalendarEvent[], now: number): CalendarEvent | null {
+  // A real meeting (other people, or a call link) beats a block you put in for yourself ("Pay credit card!").
+  const real = meetings.filter((meeting) => meeting.attendees.length > 0 || meeting.provider !== null);
+  return mostOverlapping(recording, real, now) ?? mostOverlapping(recording, meetings, now);
+}
+
+/**
+ * Finds the meeting that overlaps a call the longest.
+ * @param recording The call.
+ * @param meetings The candidates.
+ * @param now The current time, the end of a call still going.
+ * @returns The meeting, or null when none overlapped.
+ */
+function mostOverlapping(recording: StoredRecording, meetings: CalendarEvent[], now: number): CalendarEvent | null {
   const end = recording.end ?? now;
   let best: CalendarEvent | null = null;
   let bestOverlap = 0;

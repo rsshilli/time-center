@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CallRecording, RecordingsReport } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
 import { SIDE_NAMES, formatClock, groupTurns, transcriptText } from "./transcript";
@@ -17,14 +17,27 @@ const IDLE_REFRESH_MS = 30_000;
 export function RecordingsCard({ at }: { at: number }) {
   const [report, setReport] = useState<RecordingsReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Counts requests, so a slow answer for a day you already left can't replace a newer one. */
+  const latestRequest = useRef(0);
+
+  useEffect(() => {
+    // A newly picked day starts blank rather than showing the calls of the day you left.
+    setReport(null);
+  }, [at]);
 
   /** Reads the day's calls. */
   const load = useCallback(async () => {
+    const request = ++latestRequest.current;
     try {
-      setReport(await window.timeCenter.getRecordings(at));
-      setError(null);
+      const day = await window.timeCenter.getRecordings(at);
+      if (request === latestRequest.current) {
+        setReport(day);
+        setError(null);
+      }
     } catch (caught) {
-      setError(readableError(caught));
+      if (request === latestRequest.current) {
+        setError(readableError(caught));
+      }
     }
   }, [at]);
 
@@ -39,7 +52,7 @@ export function RecordingsCard({ at }: { at: number }) {
   if (error) {
     return <p className="error">Couldn't load the calls: {error}</p>;
   }
-  if (!report || (report.recordings.length === 0 && !report.transcriberProblem)) {
+  if (!report) {
     return null;
   }
   return (
@@ -75,7 +88,7 @@ function RecordingItem({ recording }: { recording: CallRecording }) {
     }
   };
 
-  /** Opens the call's folder (me.m4a, them.m4a) in Finder. */
+  /** Shows the call's audio file in Finder (its working folder while it's still being mixed). */
   const showAudio = async () => {
     try {
       await window.timeCenter.showRecordingAudio(recording.id);

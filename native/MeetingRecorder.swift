@@ -56,7 +56,10 @@ func fail(_ message: String) -> Never {
 final class Side {
     let src: String
     let chunkDir: URL
-    let file: AVAudioFile?
+    let fileURL: URL
+    var file: AVAudioFile?
+    /// When this side's first sound was heard (epoch ms), to line the two sides up when they're mixed.
+    var firstAt: Double?
     var converter: AVAudioConverter?
     var inFormat: AVAudioFormat?
     var samples: [Float] = []
@@ -76,9 +79,8 @@ final class Side {
             AVNumberOfChannelsKey: 1,
             AVEncoderBitRateKey: 32000,
         ]
-        file = try? AVAudioFile(
-            forWriting: dir.appendingPathComponent("\(src).m4a"), settings: settings,
-            commonFormat: .pcmFormatFloat32, interleaved: false)
+        fileURL = dir.appendingPathComponent("\(src).m4a")
+        file = try? AVAudioFile(forWriting: fileURL, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
         if file == nil {
             say(["warning": "Could not create \(src).m4a; the transcript still works."])
         }
@@ -113,6 +115,9 @@ final class Side {
         }
         if error != nil || converted.frameLength == 0 {
             return
+        }
+        if firstAt == nil {
+            firstAt = Date().timeIntervalSince1970 * 1000 - Double(converted.frameLength) / RATE * 1000
         }
         try? file?.write(from: converted)
         if samples.isEmpty {
@@ -223,6 +228,7 @@ final class Side {
     /// part that can't be recovered later, while a chunk left on disk is picked up on the next start.
     func finish() {
         file?.close()
+        file = nil
         flush()
     }
 
@@ -317,10 +323,11 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
             them.finish()
             me.finish()
         }
+        mixSides()
         fail("Recording stopped: \(error.localizedDescription)")
     }
 
-    /// Stops the stream, finishes both sides and exits.
+    /// Stops the stream, finishes both sides, mixes them into one file and exits.
     func stop() {
         let done = DispatchSemaphore(value: 0)
         if let stream {
@@ -331,13 +338,82 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
             them.finish()
             me.finish()
         }
+        mixSides()
         exit(0)
     }
+
+    /// Mixes the two sides into `call.m4a`, each placed at the moment its first sound arrived, then deletes
+    /// them. Time Center names that file after the meeting. If mixing fails, the two side files are kept.
+    func mixSides() {
+        let present = [them, me].filter { $0.firstAt != nil && FileManager.default.fileExists(atPath: $0.fileURL.path) }
+        guard let base = present.compactMap({ $0.firstAt }).min(), let dir = present.first?.fileURL.deletingLastPathComponent() else {
+            return
+        }
+        mixFiles(present.map { (url: $0.fileURL, offset: ($0.firstAt! - base) / 1000) }, into: dir.appendingPathComponent("call.m4a"))
+    }
+}
+
+/// Mixes audio files into one m4a, each starting `offset` seconds in, and deletes them once it's written.
+/// - Returns: Whether the mixed file was written.
+@discardableResult
+func mixFiles(_ placed: [(url: URL, offset: Double)], into output: URL) -> Bool {
+    let result = MixResult()
+    let done = DispatchSemaphore(value: 0)
+    // Detached: the calling thread waits on the semaphore below, so the work must not need it.
+    Task.detached {
+        defer { done.signal() }
+        do {
+            let composition = AVMutableComposition()
+            for side in placed {
+                let asset = AVURLAsset(url: side.url)
+                guard let source = try await asset.loadTracks(withMediaType: .audio).first,
+                      let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+                else {
+                    continue
+                }
+                let duration = try await asset.load(.duration)
+                let at = CMTime(seconds: side.offset, preferredTimescale: Int32(RATE))
+                try track.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: source, at: at)
+            }
+            guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
+                return
+            }
+            try? FileManager.default.removeItem(at: output)
+            try await export.export(to: output, as: .m4a)
+            result.ok = true
+        } catch {
+            say(["warning": "Couldn't mix the two sides into one file: \(error.localizedDescription)"])
+        }
+    }
+    _ = done.wait(timeout: .now() + 300)
+    if result.ok {
+        for side in placed {
+            try? FileManager.default.removeItem(at: side.url)
+        }
+    }
+    return result.ok
+}
+
+/// Whether the mix finished, set from the mixing task and read after it.
+final class MixResult: @unchecked Sendable {
+    var ok = false
 }
 
 let args = CommandLine.arguments
 guard args.count >= 2 else {
-    fail("usage: meeting-recorder <out-dir>")
+    fail("usage: meeting-recorder <out-dir> | meeting-recorder --mix <dir>")
+}
+// Mix-only: a folder left with me.m4a / them.m4a (recorded before calls were mixed, or a mix that failed).
+// When each side's first sound came isn't known any more, so both start at 0, which can be up to a second off.
+if args[1] == "--mix" {
+    guard args.count >= 3 else {
+        fail("usage: meeting-recorder --mix <dir>")
+    }
+    let dir = URL(fileURLWithPath: args[2], isDirectory: true)
+    let sides = ["them", "me"].map { dir.appendingPathComponent("\($0).m4a") }
+        .filter { FileManager.default.fileExists(atPath: $0.path) }
+        .map { (url: $0, offset: 0.0) }
+    exit(!sides.isEmpty && mixFiles(sides, into: dir.appendingPathComponent("call.m4a")) ? 0 : 1)
 }
 let outDir = URL(fileURLWithPath: args[1], isDirectory: true)
 do {

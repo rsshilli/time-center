@@ -1,4 +1,6 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 /** A piece of one side of the call, written at a pause, waiting for whisper. */
@@ -69,6 +71,23 @@ export function startRecorder(binaryPath: string, folder: string, events: Record
       child.stdin.end();
     },
   };
+}
+
+/**
+ * Mixes a folder's leftover me.m4a / them.m4a into call.m4a with the recorder's `--mix` mode: calls recorded
+ * before both sides were mixed, or whose mix failed when the call ended. Does nothing when there are none.
+ * @param binaryPath The compiled recorder.
+ * @param folder The recording's working folder.
+ * @returns Whether a mixed file was written.
+ */
+export async function mixLeftoverSides(binaryPath: string, folder: string): Promise<boolean> {
+  const sides = ["me.m4a", "them.m4a"].filter((name) => existsSync(join(folder, name)));
+  if (sides.length === 0 || existsSync(join(folder, "call.m4a"))) {
+    return false;
+  }
+  return new Promise((resolve) => {
+    execFile(binaryPath, ["--mix", folder], { timeout: 5 * 60_000 }, (error) => resolve(error === null));
+  });
 }
 
 /**

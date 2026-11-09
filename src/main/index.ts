@@ -32,10 +32,15 @@ import { S3ObjectStorage } from "./backup/ObjectStorage";
 import { registerIpcHandlers } from "./ipcHandlers";
 import { Permissions, runAppleScript } from "./permissions/Permissions";
 import { RecordingController } from "./recording/RecordingController";
-import { startRecorder } from "./recording/recorderProcess";
-import { cleanUpRecordings, countUnreadChunks, recoverRecordings } from "./recording/recordingFiles";
-import { registerRecordingIpc } from "./recording/recordingIpc";
-import { RecordingStore } from "./recording/RecordingStore";
+import { mixLeftoverSides, startRecorder } from "./recording/recorderProcess";
+import {
+  cleanUpRecordings,
+  countUnreadChunks,
+  nameRecordingAudio,
+  recoverRecordings,
+} from "./recording/recordingFiles";
+import { bestMeeting, registerRecordingIpc } from "./recording/recordingIpc";
+import { RecordingStore, type StoredRecording } from "./recording/RecordingStore";
 import { Transcriber } from "./recording/Transcriber";
 import { cancelWhisper, prepareWhisper, runWhisper } from "./recording/whisper";
 import { cleanUpScreenshots } from "./screenshots/cleanUpScreenshots";
@@ -79,11 +84,33 @@ async function main(): Promise<void> {
   const transcriber = createTranscriber(recordings);
   // Finds whisper and the model (downloading it the first time) now, so a problem shows before the first call.
   void transcriber.prepareAhead();
+  const recordingsDir = join(app.getPath("userData"), "recordings");
+  /**
+   * Names a finished call's one audio file after the meeting it overlapped most (Calendar is read only once
+   * a call ends, long after it's set up below).
+   * @param recording The call.
+   */
+  const nameAudio = async (recording: StoredRecording) => {
+    if (recording.audioPath || recording.end === null) {
+      return;
+    }
+    await mixLeftoverSides(helperPath("meeting-recorder"), recording.folder);
+    const meetings = calendar.store
+      .listTypedEvents(recording.start, recording.end ?? Date.now())
+      .filter((meeting) => meeting.response !== "declined");
+    await nameRecordingAudio(recordings, recording, bestMeeting(recording, meetings, Date.now())?.title ?? null, recordingsDir);
+  };
   const recorder = new RecordingController({
     store: recordings,
     startRecorder: (folder, events) => startRecorder(helperPath("meeting-recorder"), folder, events),
     transcribe: (id, chunk) => transcriber.add(id, chunk),
-    recordingsDir: join(app.getPath("userData"), "recordings"),
+    onFinished: (id) => {
+      const recording = recordings.getRecording(id);
+      if (recording) {
+        nameAudio(recording).catch((error: unknown) => console.error("Time Center: couldn't name the call's audio", error));
+      }
+    },
+    recordingsDir,
     onChange: () => tray.refresh(),
     now: () => Date.now(),
   });
@@ -162,14 +189,18 @@ async function main(): Promise<void> {
     transcriber,
     listMeetings: (from, to) => calendar.store.listTypedEvents(from, to),
     showInFinder: (path) => {
-      void shell.openPath(path);
+      if (path.endsWith(".m4a")) {
+        shell.showItemInFolder(path);
+      } else {
+        void shell.openPath(path);
+      }
     },
     countUnread: countUnreadChunks,
     now: () => Date.now(),
   });
   handleScreenshotScheme(activity);
   tray.create();
-  recoverRecordings(recordings, transcriber).catch((error: unknown) => {
+  recoverRecordings(recordings, transcriber, nameAudio).catch((error: unknown) => {
     console.error("Time Center: couldn't pick up unfinished recordings", error);
   });
   // Stops a recording once its call is over, even if the helper's samples stop coming.
@@ -390,12 +421,15 @@ function createPermissions(): Permissions {
 }
 
 /**
- * Picks the screen a second launch asked for with `--open=permissions` or `--open=settings`; the
- * dashboard otherwise.
+ * Picks the screen a second launch asked for with `--open=recordings`, `--open=permissions` or
+ * `--open=settings`; the dashboard otherwise.
  * @param argv The second instance's command line.
  * @returns The screen to show.
  */
 function screenFromArgs(argv: string[]): Screen {
+  if (argv.includes("--open=recordings")) {
+    return "recordings";
+  }
   if (argv.includes("--open=permissions")) {
     return "permissions";
   }

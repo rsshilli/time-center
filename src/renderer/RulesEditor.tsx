@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CategoryRule, RuleField } from "../shared/ipc";
+import { ruleMatches } from "./ruleFilter";
 
 /** The fields a rule can look at, as the user reads them. */
 export const FIELD_LABELS: Record<RuleField, string> = {
@@ -17,6 +18,8 @@ export const FIELD_LABELS: Record<RuleField, string> = {
 export function RulesEditor() {
   const [rules, setRules] = useState<CategoryRule[] | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  /** Narrows the list to rules mentioning this, to find one to fix. */
+  const [filter, setFilter] = useState("");
 
   useEffect(() => {
     void window.timeCenter.getRules().then(setRules);
@@ -60,6 +63,12 @@ export function RulesEditor() {
     }
   };
 
+  // Positions stay those of the full list, so editing, moving and removing act on the right rule while filtered.
+  const shown = rules
+    .map((rule, index) => ({ rule, index }))
+    .filter(({ rule }) => ruleMatches(rule, filter, FIELD_LABELS));
+  const filtering = filter.trim() !== "";
+
   return (
     <section className="rules">
       <h1>Categories</h1>
@@ -67,8 +76,23 @@ export function RulesEditor() {
         These rules sort your time into categories, top to bottom: the first rule that matches wins. Changes
         apply to past days too.
       </p>
+      <div className="rule-filter">
+        <input
+          type="search"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          placeholder="Filter by website, app, title or category"
+          aria-label="Filter rules"
+        />
+        {filtering && (
+          <span className="muted">
+            {shown.length} of {rules.length} rules
+          </span>
+        )}
+      </div>
       <div className="settings">
-        {rules.map((rule, index) => (
+        {filtering && shown.length === 0 && <p className="muted">No rule mentions "{filter.trim()}".</p>}
+        {shown.map(({ rule, index }) => (
           <div className="rule" key={index}>
             <select value={rule.field} onChange={(event) => edit(index, { field: event.target.value as RuleField })}>
               {(Object.keys(FIELD_LABELS) as RuleField[]).map((field) => (

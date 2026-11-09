@@ -693,6 +693,18 @@ button.link.total-name {
   align-items: center;
 }
 
+.rule-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.rule-filter input {
+  flex: 1;
+}
+
+.rule-filter input,
 .rule select,
 .rule input {
   font: inherit;

@@ -19,6 +19,8 @@ export interface RecordingControllerDeps {
   startRecorder(folder: string, events: RecorderEvents): RecorderHandle;
   /** Queues a piece of audio for whisper. */
   transcribe(recordingId: number, chunk: AudioChunk): void;
+  /** The recorder has exited and mixed both sides into one file, which can now be named after the meeting. */
+  onFinished(recordingId: number): void;
   /** The folder that holds one sub-folder per day of recordings. */
   recordingsDir: string;
   /** Called when recording starts or stops, to redraw the menu-bar dot. */
@@ -105,7 +107,8 @@ export class RecordingController {
    */
   private start(now: number): void {
     const stamp = localStamp(now);
-    const folder = join(this.deps.recordingsDir, stamp.day, `${stamp.time}${stamp.zone}`);
+    // Working files go in a hidden folder; the recordings folder itself holds only the named calls.
+    const folder = join(this.deps.recordingsDir, ".work", stamp.day, `${stamp.time}${stamp.zone}`);
     const id = this.deps.store.insertRecording(now, folder);
     const handle = this.deps.startRecorder(folder, {
       /** Notes a refused microphone, so Today can say only the other side was recorded. */
@@ -116,8 +119,12 @@ export class RecordingController {
       },
       // A chunk can arrive after stop(): the recorder flushes its last one on the way out.
       onChunk: (chunk) => this.deps.transcribe(id, chunk),
-      /** The recorder stopped by itself (not asked to): close the row, keep the reason, and hold off until the call ends. */
+      /**
+       * The recorder exited, its one file mixed. If it stopped by itself (not asked to): close the row, keep the
+       * reason, and hold off until the call ends.
+       */
       onExit: (error) => {
+        this.deps.onFinished(id);
         if (this.active?.id !== id) {
           return;
         }

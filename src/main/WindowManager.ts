@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { BrowserWindow } from "electron";
 
 /** The screens the single app window can show. */
-export type Screen = "dashboard" | "permissions" | "settings";
+export type Screen = "dashboard" | "recordings" | "permissions" | "settings";
 
 /**
  * Owns the one app window. It is created when needed and destroyed (not hidden) when closed, so the

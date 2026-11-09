@@ -25,6 +25,7 @@ function setUp() {
       return { stop: () => (recorder.stopped = true) };
     },
     transcribe: (id, chunk: AudioChunk) => log.push(`transcribe ${id} ${chunk.side}`),
+    onFinished: (id) => log.push(`finished ${id}`),
     recordingsDir: "/data/recordings",
     onChange: () => log.push("changed"),
     now: () => clock.now,
@@ -52,7 +53,16 @@ describe("RecordingController", () => {
     samples(true, START_AFTER_MS + 3_000);
     expect(recorders).toHaveLength(1);
     expect(controller.isRecording()).toBe(true);
-    expect(recorders[0].folder).toMatch(/^\/data\/recordings\/\d{4}-\d{2}-\d{2}\/\d{6}[+-]\d{4}$/);
+    expect(recorders[0].folder).toMatch(/^\/data\/recordings\/\.work\/\d{4}-\d{2}-\d{2}\/\d{6}[+-]\d{4}$/);
+  });
+
+  it("should hand the call over for naming once the recorder has exited, asked to or not", () => {
+    const { controller, log, recorders, samples } = setUp();
+    samples(true, 9_000);
+    controller.stop();
+    expect(log).not.toContain("finished 1");
+    recorders[0].events.onExit(null);
+    expect(log).toContain("finished 1");
   });
 
   it("should keep one recording through a short gap and stop half a minute after the call ends, at its real end", () => {

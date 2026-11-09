@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { screenshotUrl, type DayReport, type ScreenshotInfo, type TimelineItem, type Total } from "../shared/ipc";
-import { colourFor, formatClock, formatDay, formatDuration } from "./format";
+import { DayHeader } from "./DayHeader";
+import { startOfDay } from "./day";
+import { colourFor, formatClock, formatDuration } from "./format";
 import { MINUTE, SHIFT_STEP, stepMoment, stepToChange } from "./timelineStep";
 import { keepInView, panRange, tickMoments, zoomRange, type TimeRange } from "./timelineZoom";
 import { UNCATEGORIZED } from "./uncategorized";
 import { AddEntryPanel } from "./AddEntryPanel";
 import { snapRange } from "./manualEntry";
 import { MeetingTypesCard } from "./MeetingTypesCard";
-import { RecordingsCard } from "./RecordingsCard";
 import { ShotLightbox } from "./ShotLightbox";
 import { UncategorizedPanel } from "./UncategorizedPanel";
 
@@ -33,9 +34,10 @@ const DRAG_THRESHOLD_PX = 4;
  * One day of your time: how long you worked, were away, or were in an ignored app; a timeline coloured
  * by category that you click to see that moment's screenshots and window; and totals by category, app,
  * project and website.
+ * @param props.at A moment in the picked day, shared with the Recordings tab.
+ * @param props.onChangeDay Called with a moment in the newly picked day.
  */
-export function DashboardScreen() {
-  const [at, setAt] = useState(() => Date.now());
+export function DashboardScreen({ at, onChangeDay }: { at: number; onChangeDay: (at: number) => void }) {
   const [report, setReport] = useState<DayReport | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   /** The zoomed-in stretch of the timeline, or null for the whole day. */
@@ -47,8 +49,15 @@ export function DashboardScreen() {
   const [adding, setAdding] = useState<TimeRange | null>(null);
   /** Counts requests, so a slow answer for a day you already left can't replace a newer one. */
   const latestRequest = useRef(0);
-  const today = startOfDay(Date.now());
-  const isToday = report?.dayStart === today;
+  const dayStart = startOfDay(at);
+  const isToday = dayStart === startOfDay(Date.now());
+
+  useEffect(() => {
+    // A new day starts with nothing picked, zoomed or being marked.
+    setSelected(null);
+    setZoom(null);
+    setAdding(null);
+  }, [dayStart]);
 
   /** Reads the day from the main process. */
   const load = useCallback(async () => {
@@ -71,17 +80,8 @@ export function DashboardScreen() {
     if (startOfDay(at) !== startOfDay(Date.now())) {
       return undefined;
     }
-    const timer = setInterval(() => {
-      // Left open past midnight, "today" moves on to the new day rather than re-reading yesterday.
-      if (startOfDay(at) !== startOfDay(Date.now())) {
-        setAt(Date.now());
-        setSelected(null);
-        setZoom(null);
-        setAdding(null);
-        return;
-      }
-      void load();
-    }, REFRESH_MS);
+    // Past midnight the window (App) moves the picked day on to the new one.
+    const timer = setInterval(() => void load(), REFRESH_MS);
     return () => clearInterval(timer);
   }, [at, load]);
 
@@ -122,49 +122,20 @@ export function DashboardScreen() {
     return () => window.removeEventListener("keydown", onKey);
   }, [report, selected]);
 
-  /**
-   * Moves to the day before or after.
-   * @param direction -1 for the day before, 1 for the day after.
-   */
-  const changeDay = (direction: -1 | 1) => {
-    if (!report) {
-      return;
-    }
-    setAt(direction === -1 ? report.dayStart - HOUR : report.dayEnd + HOUR);
-    setSelected(null);
-    setZoom(null);
-    setAdding(null);
-  };
-
-  if (!report) {
-    return error ? <p className="error">Couldn't load the day: {error}</p> : null;
+  // Until the picked day has loaded, show just the header rather than the day you left.
+  if (!report || report.dayStart !== dayStart) {
+    return (
+      <section className="dashboard">
+        <DayHeader at={at} onChange={onChangeDay} />
+        {error && <p className="error">Couldn't load the day: {error}</p>}
+      </section>
+    );
   }
   const empty = report.timeline.length === 0;
 
   return (
     <section className="dashboard">
-      <header className="day-header">
-        <button className="secondary" onClick={() => changeDay(-1)} aria-label="Day before">
-          ‹
-        </button>
-        <h1>{formatDay(report.dayStart, today)}</h1>
-        <button className="secondary" onClick={() => changeDay(1)} disabled={isToday} aria-label="Day after">
-          ›
-        </button>
-        {!isToday && (
-          <button
-            className="secondary"
-            onClick={() => {
-              setAt(Date.now());
-              setSelected(null);
-              setZoom(null);
-              setAdding(null);
-            }}
-          >
-            Today
-          </button>
-        )}
-      </header>
+      <DayHeader at={at} onChange={onChangeDay} />
 
       <div className="summary">
         <Stat label="Working" ms={report.activeMs} />
@@ -214,7 +185,6 @@ export function DashboardScreen() {
             <TotalsCard title="Websites" totals={report.byDomain} empty="No Chrome tabs" />
           </div>
           {report.meetings.length > 0 && <MeetingTypesCard meetings={report.meetings} onChanged={() => void load()} />}
-          <RecordingsCard at={report.dayStart} />
           {showUncategorized && (
             <UncategorizedPanel
               timeline={report.timeline}
@@ -226,17 +196,6 @@ export function DashboardScreen() {
       )}
     </section>
   );
-}
-
-/**
- * Finds local midnight for a moment.
- * @param ms The moment.
- * @returns Midnight, in milliseconds.
- */
-function startOfDay(ms: number): number {
-  const date = new Date(ms);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
 }
 
 /**
