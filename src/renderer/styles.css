@@ -609,6 +609,77 @@ button.link.total-name {
   font-size: 12px;
 }
 
+/* Recorded calls */
+
+.recordings {
+  margin-top: 10px;
+}
+
+.recording-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.recording-head {
+  display: grid;
+  grid-template-columns: 150px 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.recording-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recording-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.recording p {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.transcript {
+  list-style: none;
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+  user-select: text;
+}
+
+.turn {
+  display: grid;
+  grid-template-columns: 70px 44px 1fr;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.turn-time {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.turn-side {
+  font-weight: 600;
+}
+
+.turn-me .turn-side {
+  color: #f26a10;
+}
+
 /* Category rules */
 
 .rules {

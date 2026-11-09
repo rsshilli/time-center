@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   Notification,
@@ -31,6 +31,13 @@ import { BackupService } from "./backup/BackupService";
 import { S3ObjectStorage } from "./backup/ObjectStorage";
 import { registerIpcHandlers } from "./ipcHandlers";
 import { Permissions, runAppleScript } from "./permissions/Permissions";
+import { RecordingController } from "./recording/RecordingController";
+import { startRecorder } from "./recording/recorderProcess";
+import { cleanUpRecordings, countUnreadChunks, recoverRecordings } from "./recording/recordingFiles";
+import { registerRecordingIpc } from "./recording/recordingIpc";
+import { RecordingStore } from "./recording/RecordingStore";
+import { Transcriber } from "./recording/Transcriber";
+import { cancelWhisper, prepareWhisper, runWhisper } from "./recording/whisper";
 import { cleanUpScreenshots } from "./screenshots/cleanUpScreenshots";
 import { captureDisplays, sampleCpuPercent } from "./screenshots/platform";
 import { ScreenCapturer } from "./screenshots/ScreenCapturer";
@@ -68,7 +75,19 @@ async function main(): Promise<void> {
   const activity = new ActivityStore(store.db);
   /** The ignored-apps list as saved in Settings, read fresh each time it's needed. */
   const ignoredApps = () => parseIgnoredApps(store.getSetting(IGNORED_APPS_SETTING));
-  const tracker = createTracker(activity, ignoredApps);
+  const recordings = new RecordingStore(store.db);
+  const transcriber = createTranscriber(recordings);
+  // Finds whisper and the model (downloading it the first time) now, so a problem shows before the first call.
+  void transcriber.prepareAhead();
+  const recorder = new RecordingController({
+    store: recordings,
+    startRecorder: (folder, events) => startRecorder(helperPath("meeting-recorder"), folder, events),
+    transcribe: (id, chunk) => transcriber.add(id, chunk),
+    recordingsDir: join(app.getPath("userData"), "recordings"),
+    onChange: () => tray.refresh(),
+    now: () => Date.now(),
+  });
+  const tracker = createTracker(activity, ignoredApps, (onCall) => recorder.callSample(onCall));
   const screenshotsDir = join(app.getPath("userData"), "screenshots");
   const capturer = new ScreenCapturer({
     activity,
@@ -100,6 +119,7 @@ async function main(): Promise<void> {
     onJoinMeeting: (eventId) => {
       calendar.joins.joinNow(eventId).catch((error: unknown) => showJoinFailure(String(error)));
     },
+    isRecording: () => recorder.isRecording(),
   });
   const scheduler = new BackupScheduler(backupService, (result) => {
     backupState.lastError = result.ok ? null : result.error;
@@ -137,8 +157,23 @@ async function main(): Promise<void> {
     typer: calendar.typer,
     now: () => Date.now(),
   });
+  registerRecordingIpc({
+    store: recordings,
+    transcriber,
+    listMeetings: (from, to) => calendar.store.listTypedEvents(from, to),
+    showInFinder: (path) => {
+      void shell.openPath(path);
+    },
+    countUnread: countUnreadChunks,
+    now: () => Date.now(),
+  });
   handleScreenshotScheme(activity);
   tray.create();
+  recoverRecordings(recordings, transcriber).catch((error: unknown) => {
+    console.error("Time Center: couldn't pick up unfinished recordings", error);
+  });
+  // Stops a recording once its call is over, even if the helper's samples stop coming.
+  setInterval(() => recorder.tick(), 5_000);
   scheduler.start();
   tracker.start();
   capturer.start();
@@ -146,16 +181,22 @@ async function main(): Promise<void> {
   calendar.joins.start();
   // Keeps "Next: …" current as meetings start and end between syncs.
   setInterval(() => tray.refresh(), 60_000);
-  /** Deletes screenshots past the 30-day retention, logging rather than crashing on a failure. */
+  /** Deletes screenshots and call audio past the 30-day retention, logging rather than crashing on a failure. */
   const cleanUp = () => {
     cleanUpScreenshots(screenshotsDir, activity, Date.now()).catch((error: unknown) => {
       console.error("Time Center: screenshot clean-up failed", error);
+    });
+    cleanUpRecordings(recordings, Date.now()).catch((error: unknown) => {
+      console.error("Time Center: recording clean-up failed", error);
     });
   };
   cleanUp();
   setInterval(cleanUp, CLEAN_UP_EVERY_MS);
 
-  powerMonitor.on("suspend", () => tracker.pause("asleep"));
+  powerMonitor.on("suspend", () => {
+    tracker.pause("asleep");
+    recorder.stop();
+  });
   powerMonitor.on("lock-screen", () => tracker.pause("locked"));
   powerMonitor.on("unlock-screen", () => tracker.resume("locked"));
   powerMonitor.on("resume", () => {
@@ -175,6 +216,8 @@ async function main(): Promise<void> {
     calendar.sync.stop();
     capturer.stop();
     tracker.stop();
+    recorder.stop();
+    transcriber.stop();
     scheduler.stop();
     if (scheduler.isRunning()) {
       // Closing the database under a running backup would leave it half-recorded, so wait for it.
@@ -197,15 +240,41 @@ async function main(): Promise<void> {
  * Builds the activity tracker on the Swift front-window helper and macOS's idle timer.
  * @param activity The activity tables.
  * @param ignoredApps Reads the current ignored-apps list; each helper start picks up the latest.
+ * @param onCallState Told whether each sample saw a call, to start and stop recording.
  * @returns The tracker, not yet started.
  */
-function createTracker(activity: ActivityStore, ignoredApps: () => string[]): ActivityTracker {
+function createTracker(
+  activity: ActivityStore,
+  ignoredApps: () => string[],
+  onCallState: (onCall: boolean) => void,
+): ActivityTracker {
   return new ActivityTracker({
     recorder: new SegmentRecorder(activity),
     startHelper: (onSample, onExit) =>
       startWindowHelper(helperPath(), SAMPLE_INTERVAL_SECONDS, ignoredApps(), onSample, onExit),
     getIdleMs: () => powerMonitor.getSystemIdleTime() * 1000,
     now: () => Date.now(),
+    onCallState,
+  });
+}
+
+/**
+ * Builds the transcriber on whisper.cpp (Homebrew's whisper-cli) and the large-v3-turbo model kept in the
+ * app's folder, downloaded the first time it's needed.
+ * @param recordings The recordings table, where the lines go.
+ * @returns The transcriber.
+ */
+function createTranscriber(recordings: RecordingStore): Transcriber {
+  return new Transcriber({
+    store: recordings,
+    prepare: () => prepareWhisper(join(app.getPath("userData"), "models")),
+    run: runWhisper,
+    remove: (wav) => rm(wav, { force: true }),
+    setAside: (wav) => rename(wav, `${wav}.failed`),
+    cancel: cancelWhisper,
+    // The Calls card re-reads on its own (every 5 s while a call is busy, else 30 s), so there's nothing to push.
+    onChange: () => {},
+    log: (message, error) => console.error(message, error),
   });
 }
 
@@ -291,14 +360,15 @@ function showJoinFailure(message: string): void {
 }
 
 /**
- * Finds the compiled Swift helper.
+ * Finds a compiled Swift helper.
+ * @param name "active-window" (the front-window reader) or "meeting-recorder" (the call recorder).
  * @returns Contents/Resources/bin in the packaged app (electron-builder extraResources); in dev, the
  *   copy built by `npm run native`.
  */
-function helperPath(): string {
+function helperPath(name: "active-window" | "meeting-recorder" = "active-window"): string {
   return app.isPackaged
-    ? join(process.resourcesPath, "bin/active-window")
-    : join(app.getAppPath(), "resources/bin/active-window");
+    ? join(process.resourcesPath, "bin", name)
+    : join(app.getAppPath(), "resources/bin", name);
 }
 
 /**

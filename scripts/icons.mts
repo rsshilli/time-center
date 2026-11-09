@@ -12,6 +12,15 @@ const TRAY_SIZES = [
   { size: 36, file: "resources/tray@2x.png" },
 ];
 
+/** The menu-bar icon while a call is being recorded: the same rabbit with a red dot in its corner. */
+const RECORDING_TRAY_SIZES = [
+  { size: 18, file: "resources/tray-recording.png" },
+  { size: 36, file: "resources/tray-recording@2x.png" },
+];
+
+/** The red dot, in the source's 64-unit space, ringed in white so it reads on the orange. */
+const RECORDING_DOT = '<circle cx="50" cy="14" r="12" fill="#E3242B" stroke="#FFFFFF" stroke-width="3"/>';
+
 /** Every image an .icns file holds, named the way `iconutil` expects. */
 const ICONSET = [
   { size: 16, name: "icon_16x16.png" },
@@ -34,6 +43,10 @@ function main(): void {
   const source = readFileSync(SOURCE, "utf8");
   for (const { size, file } of TRAY_SIZES) {
     renderPng(source, size, file);
+  }
+  const recording = source.replace(/<\/svg>\s*$/, `${RECORDING_DOT}</svg>`);
+  for (const { size, file } of RECORDING_TRAY_SIZES) {
+    renderPng(recording, size, file);
   }
   buildAppIcon(padForAppIcon(source), "build/icon.icns");
 }

@@ -57,6 +57,27 @@ describe("ActivityTracker", () => {
     expect(tracker.current()).toBeNull();
   });
 
+  it("should pass on each sample's call state even while paused, since a call goes on with the screen locked", () => {
+    const { recorder } = fakeRecorder();
+    const seen: boolean[] = [];
+    const tracker = new ActivityTracker({
+      recorder,
+      startHelper: (onSample, onExit) => {
+        send = onSample;
+        exit = onExit;
+        return { stop: () => stops++ };
+      },
+      getIdleMs: () => 0,
+      now: () => 1000,
+      onCallState: (onCall) => seen.push(onCall),
+    });
+    tracker.start();
+    send({ app: "Zoom", bundleId: null, title: null, url: null, ignored: false, onCall: true });
+    tracker.pause("locked");
+    send({ app: "loginwindow", bundleId: null, title: null, url: null, ignored: false });
+    expect(seen).toEqual([true, false]);
+  });
+
   it("should keep paused until every reason is lifted", () => {
     const { recorder, calls } = fakeRecorder();
     const tracker = build(recorder);

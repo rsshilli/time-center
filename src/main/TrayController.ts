@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { Menu, Tray, app, nativeImage, type MenuItemConstructorOptions, type NativeImage } from "electron";
 import trayIconPath from "../../resources/tray.png?asset";
 import trayIcon2xPath from "../../resources/tray@2x.png?asset";
+import recordingIconPath from "../../resources/tray-recording.png?asset";
+import recordingIcon2xPath from "../../resources/tray-recording@2x.png?asset";
 import type { MeetingInfo } from "../shared/ipc";
 import type { BackupService } from "./backup/BackupService";
 import type { WindowManager } from "./WindowManager";
@@ -15,6 +17,8 @@ export interface TrayDependencies {
   meetings: () => { signedIn: boolean; list: MeetingInfo[] };
   onSkipMeeting: (eventId: string) => void;
   onJoinMeeting: (eventId: string) => void;
+  /** Whether a call is being recorded, which puts a red dot on the icon. */
+  isRecording: () => boolean;
 }
 
 /** One meeting line in the menu, before it becomes an Electron menu item. */
@@ -31,13 +35,15 @@ export interface MeetingMenuItem {
 export class TrayController {
   private tray: Tray | null = null;
   private lastBackupError: string | null = null;
+  /** Whether the icon now showing is the red-dot one. */
+  private showingRecording = false;
 
   /** @param deps The services the menu acts on. */
   constructor(private readonly deps: TrayDependencies) {}
 
   /** Puts the icon in the menu bar. */
   create(): void {
-    this.tray = new Tray(loadTrayIcon());
+    this.tray = new Tray(loadTrayIcon(trayIconPath, trayIcon2xPath));
     this.tray.setToolTip("Time Center");
     this.refresh(null);
   }
@@ -52,6 +58,7 @@ export class TrayController {
     if (!this.tray) {
       return;
     }
+    this.updateIcon();
     const { signedIn, list } = this.deps.meetings();
     const meetingItems = meetingMenuItems(signedIn, list, Date.now()).map(
       (item): MenuItemConstructorOptions => ({
@@ -62,6 +69,7 @@ export class TrayController {
     );
     this.tray.setContextMenu(
       Menu.buildFromTemplate([
+        ...(this.showingRecording ? [{ label: "● Recording this call", enabled: false }] : []),
         ...meetingItems,
         { type: "separator" },
         { label: "Today…", click: () => this.deps.windows.show("dashboard") },
@@ -80,6 +88,19 @@ export class TrayController {
         { label: "Quit Time Center", click: () => app.quit() },
       ]),
     );
+  }
+
+  /** Swaps the icon for the red-dot one while a call is recorded, and back after. */
+  private updateIcon(): void {
+    const recording = this.deps.isRecording();
+    if (!this.tray || recording === this.showingRecording) {
+      return;
+    }
+    this.showingRecording = recording;
+    this.tray.setImage(
+      recording ? loadTrayIcon(recordingIconPath, recordingIcon2xPath) : loadTrayIcon(trayIconPath, trayIcon2xPath),
+    );
+    this.tray.setToolTip(recording ? "Time Center: recording this call" : "Time Center");
   }
 
   /**
@@ -150,11 +171,13 @@ function stateNote(meeting: MeetingInfo): string {
  * Loads the rabbit-with-a-clock icon (drawn in resources/icon.svg, rendered by `npm run icons`) with its
  * Retina copy, so it stays sharp on every screen. It is a full-colour image, not a macOS "template"
  * image, so the orange background shows in both light and dark menu bars.
+ * @param path The 18-point PNG.
+ * @param path2x Its Retina copy.
  * @returns The 18-point icon with a 2x representation.
  */
-function loadTrayIcon(): NativeImage {
-  const icon = nativeImage.createFromPath(trayIconPath);
-  icon.addRepresentation({ scaleFactor: 2, buffer: readFileSync(trayIcon2xPath) });
+function loadTrayIcon(path: string, path2x: string): NativeImage {
+  const icon = nativeImage.createFromPath(path);
+  icon.addRepresentation({ scaleFactor: 2, buffer: readFileSync(path2x) });
   return icon;
 }
 

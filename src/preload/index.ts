@@ -31,6 +31,8 @@ const api: TimeCenterApi = {
   addManualEntry: (entry) => ipcRenderer.invoke(IPC.addManualEntry, entry),
   deleteManualEntry: (id) => ipcRenderer.invoke(IPC.deleteManualEntry, id),
   copyScreenshot: (id) => ipcRenderer.invoke(IPC.copyScreenshot, id),
+  getRecordings: (at) => ipcRenderer.invoke(IPC.getRecordings, at),
+  showRecordingAudio: (id) => ipcRenderer.invoke(IPC.showRecordingAudio, id),
 };
 
 contextBridge.exposeInMainWorld("timeCenter", api);

@@ -118,4 +118,29 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX manual_entries_started_at ON manual_entries (started_at);
   `,
+  `
+  -- Calls recorded while some app used the microphone. folder holds me.m4a / them.m4a (kept 30 days, then
+  -- deleted and audio_deleted_at set) and chunks/ waiting for whisper. ended_at is null while recording.
+  CREATE TABLE recordings (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at       TEXT NOT NULL,
+    ended_at         TEXT,
+    folder           TEXT NOT NULL,
+    mic              INTEGER NOT NULL DEFAULT 1,
+    error            TEXT,
+    audio_deleted_at TEXT
+  );
+  CREATE INDEX recordings_started_at ON recordings (started_at);
+
+  -- What whisper heard, one line per spoken stretch. side: 'me' (your microphone) or 'them' (the Mac's sound).
+  CREATE TABLE transcript_lines (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    recording_id INTEGER NOT NULL REFERENCES recordings (id) ON DELETE CASCADE,
+    side         TEXT NOT NULL CHECK (side IN ('me', 'them')),
+    started_at   TEXT NOT NULL,
+    ended_at     TEXT NOT NULL,
+    text         TEXT NOT NULL
+  );
+  CREATE INDEX transcript_lines_recording ON transcript_lines (recording_id, started_at);
+  `,
 ];

@@ -174,6 +174,11 @@ final class Reporter {
 /// 2026-11-05: `ai.krisp.krispMac` capturing input with no call going), and Time Center itself records.
 let notACall = ["ai.krisp", "org.shillington.timecenter"]
 
+/// Processes with no bundle id that hold the microphone without a call. A ScreenCaptureKit stream's
+/// microphone is captured by macOS's `replayd` on the recorder's behalf (probe 2026-11-06: only replayd was
+/// capturing while native/MeetingRecorder.swift ran); counting it would keep a finished call going for ever.
+let notACallExecutables = ["replayd"]
+
 /// Works out whether a call is going: some app other than those above is capturing microphone input
 /// (Core Audio's per-process input state, macOS 14+, needs no permission). Browser calls count too:
 /// Chrome's audio helper has no bundle id of its own, and was seen capturing during a real Meet call.
@@ -183,8 +188,19 @@ final class CallDetector {
         return capturingProcesses().contains { pid in
             let bundleId = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
             return pid != getpid() && !notACall.contains { bundleId == $0 || bundleId.hasPrefix($0 + ".") }
+                && !notACallExecutables.contains(executableName(pid))
         }
     }
+}
+
+/// The file name of a process's executable, e.g. "meeting-recorder"; empty if macOS won't say.
+func executableName(_ pid: pid_t) -> String {
+    var buffer = [CChar](repeating: 0, count: 4096)
+    let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+    if length <= 0 {
+        return ""
+    }
+    return URL(fileURLWithPath: String(cString: buffer)).lastPathComponent
 }
 
 /// Lists the processes capturing microphone input, by pid.

@@ -7,6 +7,7 @@ import { UNCATEGORIZED } from "./uncategorized";
 import { AddEntryPanel } from "./AddEntryPanel";
 import { snapRange } from "./manualEntry";
 import { MeetingTypesCard } from "./MeetingTypesCard";
+import { RecordingsCard } from "./RecordingsCard";
 import { ShotLightbox } from "./ShotLightbox";
 import { UncategorizedPanel } from "./UncategorizedPanel";
 
@@ -213,6 +214,7 @@ export function DashboardScreen() {
             <TotalsCard title="Websites" totals={report.byDomain} empty="No Chrome tabs" />
           </div>
           {report.meetings.length > 0 && <MeetingTypesCard meetings={report.meetings} onChanged={() => void load()} />}
+          <RecordingsCard at={report.dayStart} />
           {showUncategorized && (
             <UncategorizedPanel
               timeline={report.timeline}

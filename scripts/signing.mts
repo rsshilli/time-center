@@ -98,10 +98,14 @@ function setup(): void {
  */
 function sign(appPath: string): void {
   const identity = findAppleDevelopmentIdentity() ?? localIdentity();
-  // --deep covers nested bundles only, not loose executables in Resources, so sign our helper first.
-  const helper = join(appPath, "Contents/Resources/bin/active-window");
-  if (existsSync(helper)) {
-    execFileSync("codesign", ["--force", "--sign", identity.hash, ...identity.keychainArgs, helper], { stdio: "inherit" });
+  // --deep covers nested bundles only, not loose executables in Resources, so sign our helpers first.
+  for (const name of ["active-window", "meeting-recorder"]) {
+    const helper = join(appPath, "Contents/Resources/bin", name);
+    if (existsSync(helper)) {
+      execFileSync("codesign", ["--force", "--sign", identity.hash, ...identity.keychainArgs, helper], {
+        stdio: "inherit",
+      });
+    }
   }
   // --deep signs the Electron frameworks and helper apps inside the bundle with the same identity.
   execFileSync("codesign", ["--force", "--deep", "--sign", identity.hash, ...identity.keychainArgs, appPath], {

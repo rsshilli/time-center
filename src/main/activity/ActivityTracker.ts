@@ -19,6 +19,8 @@ export interface ActivityTrackerDeps {
   /** Milliseconds since the last keyboard or mouse input. */
   getIdleMs(): number;
   now(): number;
+  /** Told whether each sample saw a call, even while recording is paused (a call goes on with the screen locked). */
+  onCallState?(onCall: boolean): void;
 }
 
 /**
@@ -76,10 +78,11 @@ export class ActivityTracker {
   }
 
   /**
-   * Records a sample unless the screen is locked or the Mac is asleep.
+   * Passes on the call state, then records the sample unless the screen is locked or the Mac is asleep.
    * @param sample What was in front.
    */
   private onSample(sample: WindowSample): void {
+    this.deps.onCallState?.(sample.onCall === true);
     if (this.pausedFor.size > 0) {
       return;
     }

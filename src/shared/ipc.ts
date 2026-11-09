@@ -152,6 +152,43 @@ export interface MeetingTypeStatus {
   lastError: string | null;
 }
 
+/** One spoken stretch of a call's transcript. */
+export interface TranscriptLine {
+  /** "me" is your microphone; "them" is everything the Mac played. */
+  side: "me" | "them";
+  start: number;
+  end: number;
+  text: string;
+}
+
+/** A recorded call, as Today shows it. */
+export interface CallRecording {
+  id: number;
+  start: number;
+  /** Null while it is still recording. */
+  end: number | null;
+  /** The calendar meeting it overlapped most, if any. */
+  meetingTitle: string | null;
+  /** False when macOS refused the microphone, so only the other side was recorded. */
+  mic: boolean;
+  /** Why recording stopped early, if it did. */
+  error: string | null;
+  /** Whether the audio files are still on the Mac (they're deleted after 30 days). */
+  audioKept: boolean;
+  /** Pieces of audio still waiting for whisper. */
+  waitingChunks: number;
+  /** Pieces whisper couldn't read, set aside (still in the audio files). */
+  unreadChunks: number;
+  lines: TranscriptLine[];
+}
+
+/** The day's recorded calls, and anything stopping transcription. */
+export interface RecordingsReport {
+  recordings: CallRecording[];
+  /** e.g. "whisper.cpp isn't installed…", or null when transcription can run. */
+  transcriberProblem: string | null;
+}
+
 /** Everything the dashboard shows for one day. */
 export interface DayReport {
   /** Local midnight that starts the day, in milliseconds since 1970. */
@@ -258,6 +295,8 @@ export const IPC = {
   addManualEntry: "activity:add-manual-entry",
   deleteManualEntry: "activity:delete-manual-entry",
   copyScreenshot: "screenshots:copy",
+  getRecordings: "recordings:get",
+  showRecordingAudio: "recordings:show-audio",
 } as const;
 
 /** The API the preload script exposes to the renderer as `window.timeCenter`. */
@@ -312,4 +351,8 @@ export interface TimeCenterApi {
   deleteManualEntry(id: number): Promise<void>;
   /** Puts a screenshot on the clipboard at its full, original resolution. */
   copyScreenshot(id: number): Promise<void>;
+  /** The calls recorded on the local day that contains this moment, with their transcripts. */
+  getRecordings(at: number): Promise<RecordingsReport>;
+  /** Shows a call's audio files in Finder. */
+  showRecordingAudio(id: number): Promise<void>;
 }
