@@ -23,6 +23,11 @@
   }
 }
 
+html {
+  /* Anything scrolled into view lands below the pinned tabs, not under them. */
+  scroll-padding-top: 64px;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -32,13 +37,19 @@ body {
 .app {
   max-width: 680px;
   margin: 0 auto;
-  padding: 16px 24px 32px;
+  padding: 0 24px 32px;
 }
 
 .tabs {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   gap: 4px;
-  margin-bottom: 20px;
+  padding: 16px 0 10px;
+  margin-bottom: 10px;
+  background: var(--bg);
+  box-shadow: 0 1px 0 var(--line);
 }
 
 .tabs a {
@@ -454,7 +465,7 @@ button.shot img {
 .lightbox {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  z-index: 30;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 12px;
@@ -1533,9 +1544,11 @@ button.link.todo-source {
   position: absolute;
   right: 0;
   top: 26px;
-  z-index: 10;
+  z-index: 25;
   display: grid;
   min-width: 220px;
+  max-height: 60vh;
+  overflow-y: auto;
   padding: 4px;
   background: var(--panel);
   border: 1px solid var(--line);

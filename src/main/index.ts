@@ -1,4 +1,6 @@
+import { execFile } from "node:child_process";
 import { readFile, rename, rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   Notification,
@@ -61,6 +63,7 @@ import { handleScreenshotScheme, registerScreenshotScheme } from "./screenshots/
 import { enableStartAtLoginOnce } from "./startAtLogin";
 import { SecretStore } from "./store/SecretStore";
 import { Store } from "./store/Store";
+import { type HandoffDependencies, handoffActions } from "./todos/handoff";
 import { jiraActions, readJiraSettings, saveJiraSettings } from "./todos/jira";
 import { registerTodoIpc } from "./todos/todoIpc";
 import { TodoStore } from "./todos/TodoStore";
@@ -265,9 +268,25 @@ async function main(): Promise<void> {
     now: () => Date.now(),
   });
   const jira = { settings: store, secrets: new SecretStore(store, safeStorage), fetch };
+  const handoff: HandoffDependencies = {
+    home: homedir(),
+    callTranscript: (id) =>
+      recordings.getRecording(id) ? { lines: recordings.listLines(id), speakers: callSpeakers(speakerStore, id) } : null,
+    openExternal: (url) => shell.openExternal(url),
+    run: (file, args, env) =>
+      new Promise((resolve, reject) => {
+        execFile(file, args, { env: { ...process.env, ...env }, timeout: 30_000 }, (error, stdout, stderr) => {
+          if (error) {
+            reject(new Error(`${stderr || stdout || error.message}`.trim()));
+            return;
+          }
+          resolve(stdout);
+        });
+      }),
+  };
   registerTodoIpc({
     store: new TodoStore(store.db),
-    actions: () => jiraActions(jira),
+    actions: () => [...jiraActions(jira), ...handoffActions(handoff)],
     getJiraSettings: () => readJiraSettings(jira),
     saveJiraSettings: (input) => saveJiraSettings(jira, input),
     now: () => Date.now(),
