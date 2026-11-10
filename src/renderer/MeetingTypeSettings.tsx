@@ -35,7 +35,7 @@ export function MeetingTypeSettings() {
   };
 
   return (
-    <>
+    <section className="meeting-type-settings">
       <h1>Meeting types</h1>
       <p className="lead">
         Claude Haiku, on Amazon Bedrock, sorts each meeting into {Object.values(MEETING_TYPE_LABELS).join(", ")}, from
@@ -64,6 +64,6 @@ export function MeetingTypeSettings() {
         </button>
       </div>
       {message && <p className="message">{message}</p>}
-    </>
+    </section>
   );
 }

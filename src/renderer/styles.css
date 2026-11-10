@@ -961,6 +961,14 @@ button.link.total-name {
   margin-top: 14px;
 }
 
+.meeting-type-settings {
+  margin-bottom: 32px;
+}
+
+.meeting-type-settings .actions {
+  margin-top: 14px;
+}
+
 .calendar-settings h2 {
   font-size: 15px;
   margin: 22px 0 4px;
