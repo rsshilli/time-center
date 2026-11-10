@@ -245,4 +245,28 @@ export const MIGRATIONS: readonly string[] = [
   -- counted once; null while it hasn't been.
   ALTER TABLE recordings ADD COLUMN your_voice_learned_at TEXT;
   `,
+  `
+  -- A microphone line you said wasn't you (someone else's voice out of the Mac's speakers): hidden, and never
+  -- part of your voice.
+  ALTER TABLE transcript_lines ADD COLUMN not_you INTEGER NOT NULL DEFAULT 0;
+
+  -- What a call added to the "You" voice, so marking one of its lines takes exactly that back out.
+  ALTER TABLE recordings ADD COLUMN your_voice_embedding BLOB;
+  ALTER TABLE recordings ADD COLUMN your_voice_weight REAL;
+
+  -- Calls learned before this kept no share, so learn every call again from a fresh "You" voice. One you named
+  -- yourself ("That's me") keeps its name and speakers, but starts empty too: what it held can't be told apart
+  -- by call, and your microphone teaches it far more. Those speakers' shares are dropped with it, so un-naming
+  -- one later takes nothing out of a voice that no longer holds it.
+  UPDATE call_speakers SET voice_id = NULL, voice_score = NULL
+   WHERE confirmed = 0 AND voice_id IN (
+     SELECT id FROM voices WHERE name = 'You'
+        AND id NOT IN (SELECT voice_id FROM call_speakers WHERE confirmed = 1 AND voice_id IS NOT NULL));
+  DELETE FROM voices WHERE name = 'You'
+     AND id NOT IN (SELECT voice_id FROM call_speakers WHERE confirmed = 1 AND voice_id IS NOT NULL);
+  UPDATE voices SET embedding = zeroblob(length(embedding)), weight = 0 WHERE name = 'You';
+  UPDATE call_speakers SET named_embedding = NULL, named_weight = NULL
+   WHERE voice_id IN (SELECT id FROM voices WHERE name = 'You');
+  UPDATE recordings SET your_voice_learned_at = NULL;
+  `,
 ];

@@ -85,7 +85,8 @@ export function LiveCallCard({ recording }: { recording: CallRecording }) {
       <div className="live-columns">
         <div className="live-transcript">
           <h3>Transcript</h3>
-          {turns.length === 0 ? (
+          {/* Lines rather than turns: hiding the only line keeps the transcript, and so its Undo, in place. */}
+          {recording.lines.length === 0 ? (
             <p className="muted">Words show up here a few seconds after they're said.</p>
           ) : (
             <TranscriptTurns recording={recording} listRef={transcript} onScroll={onScroll} />

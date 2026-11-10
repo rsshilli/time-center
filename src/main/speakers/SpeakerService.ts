@@ -1,3 +1,4 @@
+import type { TranscriptLine } from "../../shared/ipc";
 import { YOUR_VOICE, yourOwnLines } from "../../shared/transcript";
 import type { AudioChunk } from "../recording/recorderProcess";
 import {
@@ -191,29 +192,87 @@ export class SpeakerService {
   }
 
   /**
+   * Says a line from your microphone wasn't you (someone else out of the Mac's speakers), or was after all. The
+   * line is hidden or shown again, what its call added to your voice comes back out, and the call is learned
+   * again (once no call is recording). A call still recording, or not learned yet, has taught nothing, so it's
+   * simply learned later without the line. A learned call whose audio is gone can't be learned again, so it
+   * keeps what it taught; taking that out would lose its good lines for good.
+   * @param lineId The line.
+   * @param notYou True when it wasn't you.
+   * @returns Whether your voice is (or will be) learned without it (false when a learned call's audio is gone).
+   */
+  setNotYou(lineId: number, notYou: boolean): boolean {
+    const recordingId = this.deps.store.setLineNotYou(lineId, notYou);
+    if (recordingId === null) {
+      throw new Error("That line is no longer in the call.");
+    }
+    const share = this.deps.store.getYourVoiceShare(recordingId);
+    if (share && !this.deps.store.hasAudio(recordingId)) {
+      return false;
+    }
+    const you = this.deps.store.findVoice(YOUR_VOICE);
+    if (share && you) {
+      this.changeVoice(you.id, share, -1);
+      this.matchSpeakers(this.deps.store.listUnconfirmedSpeakers());
+    }
+    this.deps.store.forgetYourVoiceLearned(recordingId);
+    this.learnAgain();
+    return true;
+  }
+
+  /**
    * Renames a person everywhere.
    * @param voiceId The person.
    * @param name Their new name.
    */
   renameVoice(voiceId: number, name: string): void {
-    const trimmed = name.trim().replace(/\s+/g, " ");
-    if (trimmed === "" || trimmed.length > MAX_NAME_CHARS) {
+    const typed = name.trim().replace(/\s+/g, " ");
+    if (typed === "" || typed.length > MAX_NAME_CHARS) {
       throw new Error(`A name can be 1 to ${MAX_NAME_CHARS} characters.`);
     }
+    const isYou = typed.toLowerCase() === YOUR_VOICE.toLowerCase();
+    // Your own voice always has the one spelling the transcript looks for.
+    const trimmed = isYou ? YOUR_VOICE : typed;
     const other = this.deps.store.findVoice(trimmed);
     if (other && other.id !== voiceId) {
       throw new Error(`There's already someone called ${other.name}.`);
     }
+    const wasYou = this.isYourVoice(voiceId);
     this.deps.store.renameVoice(voiceId, trimmed);
+    // Still "You": every call's share is still in this voice, so learning them again would count them twice.
+    if (wasYou !== isYou) {
+      this.deps.store.forgetAllYourVoiceLearned();
+      this.learnAgain();
+    }
   }
 
   /**
-   * Forgets a person and their voice; their calls go back to "Speaker N" and are matched again.
+   * Forgets a person and their voice; their calls go back to "Speaker N" and are matched again. Forgetting
+   * "You" starts your voice afresh from every call's microphone.
    * @param voiceId The person.
    */
   forgetVoice(voiceId: number): void {
+    const wasYou = this.isYourVoice(voiceId);
     this.deps.store.deleteVoice(voiceId);
     this.matchSpeakers(this.deps.store.listUnconfirmedSpeakers());
+    if (wasYou) {
+      this.deps.store.forgetAllYourVoiceLearned();
+      this.learnAgain();
+    }
+  }
+
+  /**
+   * Whether a person is the "You" voice.
+   * @param voiceId The person.
+   * @returns True when it is.
+   */
+  private isYourVoice(voiceId: number): boolean {
+    return this.deps.store.findVoice(YOUR_VOICE)?.id === voiceId;
+  }
+
+  /** Learns your voice from the calls not yet learned, in the background (it waits while a call records). */
+  private learnAgain(): void {
+    this.catchUp().catch((error: unknown) => this.deps.log("Time Center: couldn't learn your voice again", error));
   }
 
   /**
@@ -265,15 +324,12 @@ export class SpeakerService {
    * @param audioPath Its mixed audio file.
    */
   private async learnYourVoice(recordingId: number, audioPath: string): Promise<void> {
+    let share: VoiceSum | null = null;
     try {
       const printer = await this.loadPrinter();
       const start = this.deps.recordingStart(recordingId);
       const lines = this.deps.store.listCallLines(recordingId);
-      // The longest lines tell a voice best; a few dozen per call is plenty, and keeps a long call quick.
-      const own = yourOwnLines(lines)
-        .filter((line) => line.end - line.start >= NEW_SPEAKER_MS)
-        .sort((a, b) => b.end - b.start - (a.end - a.start))
-        .slice(0, YOUR_LINES_PER_CALL);
+      const own = linesToLearn(lines);
       const prints: Float32Array[] = [];
       if (start !== null && own.length > 0) {
         const samples = await this.deps.readCall(audioPath);
@@ -286,6 +342,11 @@ export class SpeakerService {
           await this.deps.yieldNow();
         }
       }
+      if (!sameLines(own, linesToLearn(this.deps.store.listCallLines(recordingId)))) {
+        // A line was marked "not me" meanwhile: learn the call again, without it.
+        this.catchUpAgain = true;
+        return;
+      }
       if (prints.length > 0) {
         const heard: VoiceSum = { sum: new Float32Array(prints[0].length), weight: 0 };
         for (const print of prints) {
@@ -293,12 +354,13 @@ export class SpeakerService {
         }
         const voiceId = this.deps.store.findVoice(YOUR_VOICE)?.id ?? this.deps.store.addVoice(YOUR_VOICE, { sum: new Float32Array(heard.sum.length), weight: 0 }, this.deps.now());
         this.changeVoice(voiceId, heard, 1);
+        share = heard;
         this.matchSpeakers(this.deps.store.listUnconfirmedSpeakers());
       }
     } catch (error) {
       this.deps.log(`Time Center: couldn't learn your voice from call ${recordingId}`, error);
     }
-    this.deps.store.setYourVoiceLearned(recordingId, this.deps.now());
+    this.deps.store.setYourVoiceLearned(recordingId, this.deps.now(), share);
   }
 
   /**
@@ -492,4 +554,27 @@ function voiceprintOf(printer: VoicePrinter, samples: Float32Array): Float32Arra
     return null;
   }
   return printer.voiceprint(samples);
+}
+
+/**
+ * The lines your voice is learned from in a call: your own (see yourOwnLines) long enough to tell, the longest
+ * first, since they tell a voice best; a few dozen per call is plenty, and keeps a long call quick.
+ * @param lines The call's lines.
+ * @returns Them.
+ */
+function linesToLearn(lines: TranscriptLine[]): TranscriptLine[] {
+  return yourOwnLines(lines)
+    .filter((line) => line.end - line.start >= NEW_SPEAKER_MS)
+    .sort((a, b) => b.end - b.start - (a.end - a.start))
+    .slice(0, YOUR_LINES_PER_CALL);
+}
+
+/**
+ * Whether two picks of lines are the same lines.
+ * @param a One.
+ * @param b The other.
+ * @returns True when they are.
+ */
+function sameLines(a: TranscriptLine[], b: TranscriptLine[]): boolean {
+  return a.length === b.length && a.every((line, index) => line.start === b[index].start && line.end === b[index].end);
 }

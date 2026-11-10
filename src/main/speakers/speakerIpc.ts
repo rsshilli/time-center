@@ -8,7 +8,7 @@ import type { SpeakerStore, StoredSpeaker } from "./SpeakerStore";
 
 /** What the speaker requests are answered from. */
 export interface SpeakerIpcDependencies {
-  service: Pick<SpeakerService, "nameSpeaker" | "renameVoice" | "forgetVoice">;
+  service: Pick<SpeakerService, "nameSpeaker" | "setNotYou" | "renameVoice" | "forgetVoice">;
   store: Pick<SpeakerStore, "listVoices" | "countCallsByVoice">;
 }
 
@@ -22,6 +22,12 @@ export function registerSpeakerIpc(deps: SpeakerIpcDependencies): void {
       throw new Error("Not a name.");
     }
     deps.service.nameSpeaker(assertRowId(speakerId), name);
+  });
+  ipcMain.handle(IPC.setLineNotYou, (_event, lineId: unknown, notYou: unknown) => {
+    if (typeof notYou !== "boolean") {
+      throw new Error("Say whether the line was you.");
+    }
+    return deps.service.setNotYou(assertRowId(lineId), notYou);
   });
   ipcMain.handle(IPC.getVoices, () => listNamedVoices(deps.store));
   ipcMain.handle(IPC.renameVoice, (_event, voiceId: unknown, name: unknown) => {

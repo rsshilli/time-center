@@ -81,34 +81,18 @@ export function AskCard({ at }: { at: number }) {
     }
   };
 
-  /** ⌘↩ (or Ctrl+↩) asks. */
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      void ask();
-    }
-  };
-
-  /** Adds dictated words to whatever is already typed. */
-  const addDictation = (text: string) => {
-    setQuestion((typed) => (typed.trim() === "" ? text : `${typed.trimEnd()} ${text}`));
-  };
-
   return (
     <div className="card ask">
       <h2>Ask about your calls</h2>
-      <div className="ask-input">
-        <textarea
-          value={question}
-          rows={2}
-          placeholder="e.g. What did I say I'd send Dana?"
-          aria-label="Your question"
-          onChange={(event) => setQuestion(event.target.value)}
-          onKeyDown={onKeyDown}
-          onFocus={() => void loadCalls()}
-        />
-        <DictationButton onText={addDictation} onError={setProblem} disabled={asking} />
-      </div>
+      <QuestionInput
+        question={question}
+        setQuestion={setQuestion}
+        onAsk={() => void ask()}
+        onFocus={() => void loadCalls()}
+        onError={setProblem}
+        asking={asking}
+        placeholder="e.g. What did I say I'd send Dana?"
+      />
       <div className="ask-controls">
         <label>
           About{" "}
@@ -151,6 +135,147 @@ export function AskCard({ at }: { at: number }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/**
+ * The question box inside one call on the Recordings tab: ask Sonnet about just that call. The questions you
+ * asked about it before (here or in "Ask about your calls") are listed below, newest first.
+ * @param props.recording The call.
+ */
+export function CallAskBox({ recording }: { recording: CallRecording }) {
+  const [question, setQuestion] = useState("");
+  const [history, setHistory] = useState<CallQuestion[]>([]);
+  const [asking, setAsking] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  /** Reads the questions asked about this call, here or in "Ask about your calls". */
+  const loadHistory = useCallback(() => {
+    void window.timeCenter
+      .getCallQuestions()
+      .then((all) => setHistory(all.filter((item) => isAbout(item, recording.id))))
+      .catch((caught: unknown) => setProblem(`Couldn't load your past questions: ${readableError(caught)}`));
+  }, [recording.id]);
+
+  useEffect(loadHistory, [loadHistory]);
+
+  /** Sends the question and puts the saved answer at the top of the list. */
+  const ask = async () => {
+    if (question.trim() === "" || asking) {
+      return;
+    }
+    setAsking(true);
+    setProblem(null);
+    try {
+      const saved = await window.timeCenter.askAboutCalls({ question, scope: "call", at: recording.start, recordingId: recording.id });
+      setHistory((past) => [saved, ...past]);
+      if (saved.answer !== null) {
+        setQuestion("");
+      }
+    } catch (caught) {
+      setProblem(readableError(caught));
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  return (
+    <div className="call-ask">
+      <QuestionInput
+        question={question}
+        setQuestion={setQuestion}
+        onAsk={() => void ask()}
+        onFocus={loadHistory}
+        onError={setProblem}
+        asking={asking}
+        placeholder="e.g. What did we decide about the release?"
+      />
+      <div className="ask-controls">
+        <span className="muted">⌘↩ asks</span>
+        <span className="ask-spacer" />
+        <button disabled={question.trim() === "" || asking} onClick={() => void ask()}>
+          {asking ? "Asking…" : "Ask"}
+        </button>
+      </div>
+      {asking && <p className="muted">Sonnet is reading the transcript…</p>}
+      {problem && <p className="error">{problem}</p>}
+      {history.length > 0 && (
+        <ul className="ask-history">
+          {history.map((item) => (
+            <QuestionItem key={item.id} item={item} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Whether a saved question was about one call alone.
+ * @param item The question.
+ * @param recordingId The call.
+ * @returns True when it was.
+ */
+export function isAbout(item: CallQuestion, recordingId: number): boolean {
+  return item.scope === "call" && item.sources.length === 1 && item.sources[0].recordingId === recordingId;
+}
+
+/**
+ * The box you type or dictate a question into; ⌘↩ (or Ctrl+↩) asks.
+ * @param props.question What's typed.
+ * @param props.setQuestion Changes it.
+ * @param props.onAsk Asks it.
+ * @param props.onFocus Called when the box gets focus.
+ * @param props.onError Shows a dictation problem.
+ * @param props.asking Whether a question is on its way.
+ * @param props.placeholder The example shown while it's empty.
+ */
+function QuestionInput({
+  question,
+  setQuestion,
+  onAsk,
+  onFocus,
+  onError,
+  asking,
+  placeholder,
+}: {
+  question: string;
+  setQuestion(update: (typed: string) => string): void;
+  onAsk(): void;
+  onFocus?(): void;
+  onError(problem: string | null): void;
+  asking: boolean;
+  placeholder: string;
+}) {
+  /** ⌘↩ (or Ctrl+↩) asks. */
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      onAsk();
+    }
+  };
+
+  /** Adds dictated words to whatever is already typed. */
+  const addDictation = (text: string) => {
+    setQuestion((typed) => (typed.trim() === "" ? text : `${typed.trimEnd()} ${text}`));
+  };
+
+  return (
+    <div className="ask-input">
+      <textarea
+        value={question}
+        rows={2}
+        placeholder={placeholder}
+        aria-label="Your question"
+        onChange={(event) => {
+          const typed = event.target.value;
+          setQuestion(() => typed);
+        }}
+        onKeyDown={onKeyDown}
+        onFocus={onFocus}
+      />
+      <DictationButton onText={addDictation} onError={onError} disabled={asking} />
     </div>
   );
 }

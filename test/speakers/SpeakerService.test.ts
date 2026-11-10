@@ -326,6 +326,114 @@ describe("SpeakerService", () => {
     expect(speakers.findVoice("You")?.weight).toBe(2);
   });
 
+  /**
+   * Stores a finished call whose microphone heard you twice (1) and someone else once (2, at 48 s), with its audio.
+   * @returns The call, and the other person's microphone line.
+   */
+  function callWithSomeoneOnYourMic(): { id: number; notYours: number } {
+    const id = recordings.insertRecording(T0, "/r");
+    const mic: Said[] = [
+      [1, 40, 43],
+      [1, 44, 47],
+      [2, 48, 51],
+    ];
+    const ids = recordings.insertLines(
+      id,
+      mic.map(([, from, to], index) => ({ side: "me" as const, start: T0 + from * 1000, end: T0 + to * 1000, text: `a line on my mic number ${index}` })),
+    );
+    recordings.finishRecording(id, T0 + 60_000);
+    recordings.setAudioPath(id, "/call.m4a");
+    callAudio = audio(mic, T0);
+    return { id, notYours: ids[2] };
+  }
+
+  it("should take a line you say wasn't you out of your voice and hide it, and put it back when you undo", async () => {
+    const { id, notYours } = callWithSomeoneOnYourMic();
+    await service.catchUp();
+    expect(speakers.findVoice("You")?.weight).toBe(3);
+
+    service.setNotYou(notYours, true);
+
+    await vi.waitFor(() => expect(speakers.findVoice("You")?.weight).toBe(2));
+    // Only your two lines are left in it: the other person's direction (2) is back to the background level.
+    const you = speakers.findVoice("You")!;
+    expect(you.sum[2] / you.sum[1]).toBeLessThan(0.1);
+    expect(recordings.listLines(id).map((line) => line.notYou)).toEqual([false, false, true]);
+
+    service.setNotYou(notYours, false);
+    await vi.waitFor(() => expect(speakers.findVoice("You")?.weight).toBe(3));
+  });
+
+  it("should learn a call again without a line marked not you while it was being learned", async () => {
+    const { id, notYours } = callWithSomeoneOnYourMic();
+    let release: (() => void) | undefined;
+    const decoded = callAudio;
+    // Held only once the call's voices are split, i.e. while your voice is being learned from it.
+    deps.readCall = async () => {
+      if (speakers.getState(id) === "done" && !release) {
+        await new Promise<void>((resolve) => (release = resolve));
+      }
+      return decoded;
+    };
+    const learning = service.catchUp();
+    await vi.waitFor(() => expect(release).toBeDefined());
+
+    service.setNotYou(notYours, true);
+    release!();
+    await learning;
+
+    expect(speakers.findVoice("You")?.weight).toBe(2);
+  });
+
+  it("should only hide a line you say wasn't you once the call's audio is gone, keeping what the call taught", async () => {
+    const { id, notYours } = callWithSomeoneOnYourMic();
+    await service.catchUp();
+    recordings.markAudioDeleted(id, T0 + 31 * 86_400_000);
+
+    expect(service.setNotYou(notYours, true)).toBe(false);
+
+    await service.catchUp();
+    expect(speakers.findVoice("You")?.weight).toBe(3);
+    expect(recordings.listLines(id).map((line) => line.notYou)).toEqual([false, false, true]);
+  });
+
+  it("should learn your voice afresh from every call when you forget the You voice", async () => {
+    callWithSomeoneOnYourMic();
+    await service.catchUp();
+    const you = speakers.findVoice("You")!;
+
+    service.forgetVoice(you.id);
+
+    await vi.waitFor(() => expect(speakers.findVoice("You")?.weight).toBe(3));
+    expect(speakers.findVoice("You")?.id).not.toBe(you.id);
+  });
+
+  it("should keep your voice as it is when the You voice is saved again under any spelling of You", async () => {
+    callWithSomeoneOnYourMic();
+    await service.catchUp();
+    const you = speakers.findVoice("You")!;
+
+    service.renameVoice(you.id, "You");
+    service.renameVoice(you.id, " you ");
+    await service.catchUp();
+
+    expect(speakers.findVoice("You")).toEqual(expect.objectContaining({ id: you.id, name: "You", weight: 3 }));
+  });
+
+  it("should say a line marked not you during a call will be left out when the call is learned", async () => {
+    const id = recordings.insertRecording(T0, "/r");
+    const [mine] = recordings.insertLines(id, [{ side: "me", start: T0, end: T0 + 3_000, text: "a voice from the TV" }]);
+
+    expect(service.setNotYou(mine, true)).toBe(true);
+    expect(recordings.listLines(id).map((line) => line.notYou)).toEqual([true]);
+  });
+
+  it("should refuse to mark a line that isn't from your microphone", async () => {
+    const id = recordings.insertRecording(T0, "/r");
+    const [theirs] = recordings.insertLines(id, [{ side: "them", start: T0, end: T0 + 3_000, text: "their line" }]);
+    expect(() => service.setNotYou(theirs, true)).toThrow("That line is no longer in the call.");
+  });
+
   it("should try a call once when your voice can't be learned from it", async () => {
     const id = recordings.insertRecording(T0, "/r");
     recordings.insertLines(id, [{ side: "me", start: T0, end: T0 + 3_000, text: "my own line number one" }]);

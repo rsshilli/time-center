@@ -59,6 +59,17 @@ describe("RecordingStore", () => {
     expect(recordings.listLines(id).map((line) => line.text)).toEqual(["First", "Second"]);
   });
 
+  it("should not find a call by words only in a line you said wasn't you", () => {
+    const id = recordings.insertRecording(NOON, "/r/1");
+    const [hidden] = recordings.insertLines(id, [
+      { side: "me", start: NOON, end: NOON + 1_000, text: "Dinner is ready" },
+      { side: "me", start: NOON + 2_000, end: NOON + 3_000, text: "Ship the release" },
+    ]);
+    store.db.prepare("UPDATE transcript_lines SET not_you = 1 WHERE id = ?").run(hidden);
+    expect(recordings.searchLines(["dinner"]).size).toBe(0);
+    expect(recordings.searchLines(["dinner", "release"]).get(id)?.words).toEqual(new Set(["release"]));
+  });
+
   it("should list a call still recording on its day, named after the real meeting it overlapped most", () => {
     recordings.insertRecording(NOON, "/r/1");
     const guest = [{ email: "yash@example.com", name: "Yash" }];

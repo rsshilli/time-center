@@ -32,7 +32,8 @@ export interface TodoAction {
 /** What the TODO requests are answered from. */
 export interface TodoIpcDependencies {
   store: TodoStore;
-  actions: TodoAction[];
+  /** The actions on offer now (Jira's follow the ticket types saved in Settings). */
+  actions(): TodoAction[];
   /** Jira's settings, read and saved. */
   getJiraSettings(): unknown;
   saveJiraSettings(input: unknown): Promise<unknown>;
@@ -74,9 +75,9 @@ export function registerTodoIpc(deps: TodoIpcDependencies): void {
     deps.store.clearDone();
     return list();
   });
-  ipcMain.handle(IPC.getTodoActions, () => describeActions(deps.actions));
+  ipcMain.handle(IPC.getTodoActions, () => describeActions(deps.actions()));
   ipcMain.handle(IPC.runTodoAction, async (_event, id: unknown, actionId: unknown) => {
-    await runTodoAction(deps, assertRowId(id), actionId);
+    await runTodoAction({ store: deps.store, actions: deps.actions(), now: deps.now }, assertRowId(id), actionId);
     return list();
   });
   ipcMain.handle(IPC.getJiraSettings, () => deps.getJiraSettings());
@@ -98,7 +99,7 @@ export function describeActions(actions: TodoAction[]): TodoActionInfo[] {
  * @param id The item.
  * @param actionId The action the window asked for.
  */
-export async function runTodoAction(deps: Pick<TodoIpcDependencies, "store" | "actions" | "now">, id: number, actionId: unknown): Promise<void> {
+export async function runTodoAction(deps: Pick<TodoIpcDependencies, "store" | "now"> & { actions: TodoAction[] }, id: number, actionId: unknown): Promise<void> {
   const action = deps.actions.find((candidate) => candidate.id === actionId);
   if (!action) {
     throw new Error("That isn't something an item can do.");

@@ -161,6 +161,10 @@ export interface TranscriptLine {
   text: string;
   /** Which of the call's speakers said it ("them" lines only); null when unknown. */
   speakerId: number | null;
+  /** The stored line's id (absent on lines not read from the database). */
+  id?: number;
+  /** A microphone line you said wasn't you: hidden, and never part of your voice. */
+  notYou?: boolean;
 }
 
 /** One voice on the other side of a call. */
@@ -434,7 +438,8 @@ export interface JiraSettings {
   site: string;
   email: string;
   projectKey: string;
-  issueType: string;
+  /** The ticket types the menu offers, e.g. ["Task", "Story (FRS)", "Epic (URS)", "Bug"]. */
+  issueTypes: string[];
   hasToken: boolean;
 }
 
@@ -443,7 +448,7 @@ export interface JiraSettingsInput {
   site: string;
   email: string;
   projectKey: string;
-  issueType: string;
+  issueTypes: string[];
   token: string | null;
 }
 
@@ -495,6 +500,7 @@ export const IPC = {
   getJiraSettings: "jira:get-settings",
   saveJiraSettings: "jira:save-settings",
   nameSpeaker: "speakers:name",
+  setLineNotYou: "lines:set-not-you",
   getVoices: "voices:get",
   renameVoice: "voices:rename",
   forgetVoice: "voices:forget",
@@ -589,6 +595,11 @@ export interface TimeCenterApi {
   saveJiraSettings(input: JiraSettingsInput): Promise<JiraSettings>;
   /** Says who a call speaker is (their voice is then recognized in other calls), or null for "Speaker N". */
   nameSpeaker(speakerId: number, name: string | null): Promise<void>;
+  /**
+   * Says a line from your microphone wasn't you (hidden, and taken out of your voice), or was after all.
+   * Resolves false when the call's audio is gone, so your voice can't be learned again without it.
+   */
+  setLineNotYou(lineId: number, notYou: boolean): Promise<boolean>;
   /** Everyone you've named, by name. */
   getVoices(): Promise<NamedVoice[]>;
   renameVoice(voiceId: number, name: string): Promise<NamedVoice[]>;

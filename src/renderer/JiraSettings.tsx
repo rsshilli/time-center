@@ -7,25 +7,26 @@ interface JiraForm {
   site: string;
   email: string;
   projectKey: string;
-  issueType: string;
+  /** The ticket types, separated by commas. */
+  issueTypes: string;
   token: string;
 }
 
 /**
- * Where a TODO's "Make a Jira ticket" puts the ticket: your Jira site, the email and API token you sign in
- * with, the project and the type of ticket. Saving checks them against Jira first; the token is kept with the
- * Mac's Keychain key and never shown again.
+ * Where a TODO's "Make a Jira …" puts the ticket: your Jira site, the email and API token you sign in with,
+ * the project and the types of ticket the menu offers. Saving checks them against Jira first; the token is
+ * kept with the Mac's Keychain key and never shown again.
  */
 export function JiraSettings() {
   const [saved, setSaved] = useState<Saved | null>(null);
-  const [form, setForm] = useState<JiraForm>({ site: "", email: "", projectKey: "", issueType: "", token: "" });
+  const [form, setForm] = useState<JiraForm>({ site: "", email: "", projectKey: "", issueTypes: "", token: "" });
   const [message, setMessage] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
 
   useEffect(() => {
     void window.timeCenter.getJiraSettings().then((settings) => {
       setSaved(settings);
-      setForm({ site: settings.site, email: settings.email, projectKey: settings.projectKey, issueType: settings.issueType, token: "" });
+      setForm({ site: settings.site, email: settings.email, projectKey: settings.projectKey, issueTypes: settings.issueTypes.join(", "), token: "" });
     });
   }, []);
 
@@ -42,10 +43,14 @@ export function JiraSettings() {
     setWorking(true);
     setMessage("Checking with Jira…");
     try {
-      const next = await window.timeCenter.saveJiraSettings({ ...form, token: form.token.trim() ? form.token : null });
+      const next = await window.timeCenter.saveJiraSettings({
+        ...form,
+        issueTypes: form.issueTypes.split(",").map((type) => type.trim()).filter((type) => type !== ""),
+        token: form.token.trim() ? form.token : null,
+      });
       setSaved(next);
-      setForm({ ...form, site: next.site, projectKey: next.projectKey, token: "" });
-      setMessage(`Saved. "Make a Jira ticket" makes a ${next.issueType} in ${next.projectKey}, assigned to you.`);
+      setForm({ ...form, site: next.site, projectKey: next.projectKey, issueTypes: next.issueTypes.join(", "), token: "" });
+      setMessage(`Saved. A TODO's menu can make a ${typeList(next.issueTypes)} ticket in ${next.projectKey}, assigned to you.`);
     } catch (error) {
       setMessage(readableError(error));
     } finally {
@@ -64,8 +69,8 @@ export function JiraSettings() {
     <section className="jira-settings">
       <h1>Jira</h1>
       <p className="lead">
-        A TODO's ⋯ menu can make a Jira ticket from it, assigned to you: its first line becomes the summary, the
-        whole item (with its formatting and links) the description.
+        A TODO's ⋯ menu can make a Jira ticket of each type below from it, assigned to you: its first line becomes
+        the summary, the whole item (with its formatting and links) the description.
       </p>
       <form className="settings" onSubmit={(event) => void save(event)}>
         <label>
@@ -91,8 +96,8 @@ export function JiraSettings() {
           <input value={form.projectKey} onChange={update("projectKey")} placeholder="QI" />
         </label>
         <label>
-          Type of ticket
-          <input value={form.issueType} onChange={update("issueType")} placeholder="Task" />
+          Types of ticket, separated by commas
+          <input value={form.issueTypes} onChange={update("issueTypes")} placeholder="Task, Story (FRS), Epic (URS), Bug" />
         </label>
         <div className="actions">
           <button type="submit" disabled={working}>
@@ -103,4 +108,13 @@ export function JiraSettings() {
       {message && <p className="message">{message}</p>}
     </section>
   );
+}
+
+/**
+ * Names ticket types the way a sentence would.
+ * @param types The types.
+ * @returns e.g. "Task, Story (FRS) or Bug".
+ */
+export function typeList(types: string[]): string {
+  return types.length < 2 ? types.join("") : `${types.slice(0, -1).join(", ")} or ${types.at(-1)}`;
 }

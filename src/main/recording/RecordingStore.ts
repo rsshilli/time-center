@@ -145,11 +145,13 @@ export class RecordingStore {
       .prepare("SELECT * FROM transcript_lines WHERE recording_id = ? ORDER BY started_at, id")
       .all(recordingId) as Record<string, unknown>[];
     return rows.map((row) => ({
+      id: Number(row.id),
       side: row.side === "me" ? "me" : "them",
       start: Date.parse(String(row.started_at)),
       end: Date.parse(String(row.ended_at)),
       text: String(row.text),
       speakerId: row.speaker_id === null || row.speaker_id === undefined ? null : Number(row.speaker_id),
+      notYou: Number(row.not_you ?? 0) === 1,
     }));
   }
 
@@ -174,7 +176,7 @@ export class RecordingStore {
     }
     const where = words.map(() => "text LIKE ? ESCAPE '\\'").join(" OR ");
     const rows = this.db
-      .prepare(`SELECT recording_id, text FROM transcript_lines WHERE ${where}`)
+      .prepare(`SELECT recording_id, text FROM transcript_lines WHERE not_you = 0 AND (${where})`)
       .all(...words.map((word) => `%${word.replace(/[\\%_]/g, "\\$&")}%`)) as { recording_id: number; text: string }[];
     for (const row of rows) {
       const text = row.text.toLowerCase();

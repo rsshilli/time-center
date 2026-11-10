@@ -1,6 +1,8 @@
-import type { CallRecording, TranscriptLine } from "../../src/shared/ipc";
+import type { CallQuestion, CallRecording, TranscriptLine } from "../../src/shared/ipc";
 import { dropEchoes, groupTurns, transcriptText, yourOwnLines } from "../../src/shared/transcript";
-import { stateText } from "../../src/renderer/RecordingsCard";
+import { isAbout } from "../../src/renderer/AskCard";
+import { typeList } from "../../src/renderer/JiraSettings";
+import { stateText, todoCount } from "../../src/renderer/RecordingsCard";
 
 const NINE = new Date(2026, 10, 6, 9, 30).getTime();
 
@@ -26,6 +28,11 @@ describe("groupTurns", () => {
       ["me", "Hi. Ready?"],
       ["them", "Sounds good."],
     ]);
+  });
+
+  it("should leave out the lines you said weren't you, keeping each turn's lines for marking", () => {
+    const turns = groupTurns([line("me", 0, "Hi."), { ...line("me", 1, "Someone else."), notYou: true }, line("me", 2, "Ready?")]);
+    expect(turns.map((turn) => [turn.text, turn.lines.length])).toEqual([["Hi. Ready?", 2]]);
   });
 });
 
@@ -68,6 +75,10 @@ describe("yourOwnLines", () => {
       line("them", 30, "Actually, can we move that review to Monday?"),
     ];
     expect(yourOwnLines(lines).map((kept) => kept.start)).toEqual([NINE + 10_000]);
+  });
+
+  it("should leave out a line you said wasn't you", () => {
+    expect(yourOwnLines([{ ...line("me", 0, "Actually, can we move that to Monday?"), notYou: true }])).toEqual([]);
   });
 });
 
@@ -133,5 +144,40 @@ describe("stateText", () => {
     expect(stateText(call({}))).toBe("Nothing said");
     expect(stateText(call({ unreadChunks: 2 }))).toBe("Couldn't be transcribed");
     expect(stateText(call({ lines: [line("me", 0, "Hi.")] }))).toBe("");
+  });
+});
+
+describe("todoCount", () => {
+  it("should count a folded call's possible TODOs, saying nothing when there are none", () => {
+    const item = { text: "Send the notes", saidAt: NINE };
+    expect(todoCount({ actionItems: [] } as unknown as CallRecording)).toBe("");
+    expect(todoCount({ actionItems: [item] } as unknown as CallRecording)).toBe("1 possible TODO");
+    expect(todoCount({ actionItems: [item, item] } as unknown as CallRecording)).toBe("2 possible TODOs");
+  });
+});
+
+describe("typeList", () => {
+  it("should name the ticket types the way a sentence would", () => {
+    expect(typeList(["Task"])).toBe("Task");
+    expect(typeList(["Task", "Bug"])).toBe("Task or Bug");
+    expect(typeList(["Task", "Story (FRS)", "Bug"])).toBe("Task, Story (FRS) or Bug");
+  });
+});
+
+describe("isAbout", () => {
+  it("should match only questions asked about that one call", () => {
+    const question = (scope: CallQuestion["scope"], ids: number[]): CallQuestion => ({
+      id: 1,
+      askedAt: NINE,
+      question: "What?",
+      scope,
+      sources: ids.map((recordingId) => ({ recordingId, start: NINE, title: null })),
+      note: null,
+      answer: "That.",
+      error: null,
+    });
+    expect(isAbout(question("call", [4]), 4)).toBe(true);
+    expect(isAbout(question("call", [5]), 4)).toBe(false);
+    expect(isAbout(question("day", [4]), 4)).toBe(false);
   });
 });

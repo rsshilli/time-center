@@ -49,6 +49,7 @@ const api: TimeCenterApi = {
   getJiraSettings: () => ipcRenderer.invoke(IPC.getJiraSettings),
   saveJiraSettings: (input) => ipcRenderer.invoke(IPC.saveJiraSettings, input),
   nameSpeaker: (speakerId, name) => ipcRenderer.invoke(IPC.nameSpeaker, speakerId, name),
+  setLineNotYou: (lineId, notYou) => ipcRenderer.invoke(IPC.setLineNotYou, lineId, notYou),
   getVoices: () => ipcRenderer.invoke(IPC.getVoices),
   renameVoice: (voiceId, name) => ipcRenderer.invoke(IPC.renameVoice, voiceId, name),
   forgetVoice: (voiceId) => ipcRenderer.invoke(IPC.forgetVoice, voiceId),

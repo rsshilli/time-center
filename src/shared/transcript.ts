@@ -7,6 +7,8 @@ export interface Turn {
   speakerId: number | null;
   start: number;
   text: string;
+  /** The lines joined into it, in order. */
+  lines: TranscriptLine[];
 }
 
 /** Who each side is, in the transcript. */
@@ -39,19 +41,21 @@ const ECHO_MIN_WORDS = 4;
 
 /**
  * Joins the lines each speaker said in a row into one turn, in the order they were said, leaving out your
- * microphone's echoes of the speakers, and the speakers' repeats of you.
+ * microphone's echoes of the speakers, the lines you said weren't you, and the speakers' repeats of you.
  * @param lines The call's lines, in any order.
  * @param speakers The call's speakers.
  * @returns The turns.
  */
 export function groupTurns(lines: TranscriptLine[], speakers: readonly CallSpeaker[] = []): Turn[] {
   const turns: Turn[] = [];
-  for (const line of dropRepeatsOfYou(dropEchoes(lines), speakers).sort((a, b) => a.start - b.start)) {
+  const yours = lines.filter((line) => !line.notYou);
+  for (const line of dropRepeatsOfYou(dropEchoes(yours), speakers).sort((a, b) => a.start - b.start)) {
     const last = turns.at(-1);
     if (last && last.side === line.side && last.speakerId === line.speakerId) {
       last.text = `${last.text} ${line.text}`;
+      last.lines.push(line);
     } else {
-      turns.push({ side: line.side, speakerId: line.speakerId, start: line.start, text: line.text });
+      turns.push({ side: line.side, speakerId: line.speakerId, start: line.start, text: line.text, lines: [line] });
     }
   }
   return turns;
@@ -102,13 +106,15 @@ export function dropEchoes(lines: TranscriptLine[]): TranscriptLine[] {
 /**
  * The lines from your microphone that are surely you: long enough to tell, and not repeated by a "them" line said
  * at about the same time (that's either the other people coming out of your speakers, or your own voice carried
- * to their side, and which it is can't be told from the words).
+ * to their side, and which it is can't be told from the words), and not one you said wasn't you.
  * @param lines The call's lines.
  * @returns Your own lines.
  */
 export function yourOwnLines(lines: TranscriptLine[]): TranscriptLine[] {
   const theirs = theirWords(lines);
-  return lines.filter((line) => line.side === "me" && wordsOf(line.text).size >= ECHO_MIN_WORDS && !twinsATheirLine(line, theirs));
+  return lines.filter(
+    (line) => line.side === "me" && !line.notYou && wordsOf(line.text).size >= ECHO_MIN_WORDS && !twinsATheirLine(line, theirs),
+  );
 }
 
 /**

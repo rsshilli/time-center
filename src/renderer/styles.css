@@ -737,15 +737,69 @@ button.link.total-name {
 
 .recording-head {
   display: grid;
-  grid-template-columns: 150px 1fr auto auto;
+  grid-template-columns: 22px 150px 1fr auto auto;
   gap: 10px;
   align-items: center;
+}
+
+/* The chevron that opens a call: points right when folded, down when open. */
+.chevron {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: transform 0.15s ease;
+}
+
+.chevron:hover {
+  color: inherit;
+  background: var(--bg);
+}
+
+.recording.open .chevron {
+  transform: rotate(90deg);
 }
 
 .recording-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.recording-body {
+  margin: 8px 0 6px 32px;
+  display: grid;
+  gap: 12px;
+}
+
+.recording-body h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.recording-body .transcript {
+  margin-top: 0;
+}
+
+.call-ask .ask-history {
+  max-height: 320px;
 }
 
 .recording-actions {
@@ -893,6 +947,52 @@ button.link.total-name {
 
 .turn-me .turn-side {
   color: #f26a10;
+}
+
+/* "Not me" on a line from your microphone, shown on hover. */
+.not-me {
+  /* Out of the text's way until wanted, but still reachable with Tab (display: none isn't). */
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  margin-left: 6px;
+  font-size: 11px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  vertical-align: 1px;
+}
+
+.mic-line:hover .not-me,
+.not-me:focus-visible {
+  position: static;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mic-line:hover {
+  background: rgba(242, 106, 16, 0.08);
+  border-radius: 4px;
+}
+
+.not-me:hover {
+  border-color: var(--accent, #2f6fdf);
+  color: inherit;
+}
+
+.undo-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel, #fff);
 }
 
 /* The call going on now */

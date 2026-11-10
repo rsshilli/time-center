@@ -61,7 +61,7 @@ import { handleScreenshotScheme, registerScreenshotScheme } from "./screenshots/
 import { enableStartAtLoginOnce } from "./startAtLogin";
 import { SecretStore } from "./store/SecretStore";
 import { Store } from "./store/Store";
-import { createJiraTicket, jiraUnavailable, readJiraSettings, saveJiraSettings } from "./todos/jira";
+import { jiraActions, readJiraSettings, saveJiraSettings } from "./todos/jira";
 import { registerTodoIpc } from "./todos/todoIpc";
 import { TodoStore } from "./todos/TodoStore";
 import { TrayController } from "./TrayController";
@@ -267,14 +267,7 @@ async function main(): Promise<void> {
   const jira = { settings: store, secrets: new SecretStore(store, safeStorage), fetch };
   registerTodoIpc({
     store: new TodoStore(store.db),
-    actions: [
-      {
-        id: "jira",
-        label: "Make a Jira ticket",
-        unavailable: () => jiraUnavailable(jira),
-        run: (todo) => createJiraTicket(jira, todo),
-      },
-    ],
+    actions: () => jiraActions(jira),
     getJiraSettings: () => readJiraSettings(jira),
     saveJiraSettings: (input) => saveJiraSettings(jira, input),
     now: () => Date.now(),

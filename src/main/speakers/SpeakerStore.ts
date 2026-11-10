@@ -217,9 +217,72 @@ export class SpeakerStore {
    * Records that your voice was learned from a call (or that it couldn't be), so it's never counted twice.
    * @param recordingId The call.
    * @param now When.
+   * @param share What the call added to your voice; null when nothing was.
    */
-  setYourVoiceLearned(recordingId: number, now: number): void {
-    this.db.prepare("UPDATE recordings SET your_voice_learned_at = ? WHERE id = ?").run(new Date(now).toISOString(), recordingId);
+  setYourVoiceLearned(recordingId: number, now: number, share: VoiceSum | null): void {
+    this.db
+      .prepare("UPDATE recordings SET your_voice_learned_at = ?, your_voice_embedding = ?, your_voice_weight = ? WHERE id = ?")
+      .run(new Date(now).toISOString(), share ? blob(share.sum) : null, share ? share.weight : null, recordingId);
+  }
+
+  /**
+   * What a call added to your voice.
+   * @param recordingId The call.
+   * @returns It, or null when the call isn't learned yet or added nothing.
+   */
+  getYourVoiceShare(recordingId: number): VoiceSum | null {
+    const row = this.db.prepare("SELECT your_voice_embedding, your_voice_weight FROM recordings WHERE id = ?").get(recordingId) as
+      | { your_voice_embedding: Uint8Array | null; your_voice_weight: number | null }
+      | undefined;
+    if (!row || row.your_voice_embedding === null) {
+      return null;
+    }
+    return { sum: floats(row.your_voice_embedding), weight: Number(row.your_voice_weight) };
+  }
+
+  /**
+   * Marks a call as not yet learned, with no share, so it's learned again.
+   * @param recordingId The call.
+   */
+  forgetYourVoiceLearned(recordingId: number): void {
+    this.db
+      .prepare("UPDATE recordings SET your_voice_learned_at = NULL, your_voice_embedding = NULL, your_voice_weight = NULL WHERE id = ?")
+      .run(recordingId);
+  }
+
+  /**
+   * Marks every call as not yet learned, with no share: for when the "You" voice is forgotten or renamed, so
+   * the shares it held mean nothing and every call teaches the next "You" voice afresh.
+   */
+  forgetAllYourVoiceLearned(): void {
+    this.db.prepare("UPDATE recordings SET your_voice_learned_at = NULL, your_voice_embedding = NULL, your_voice_weight = NULL").run();
+  }
+
+  /**
+   * Whether a call's audio is still kept, so your voice can be learned from it again.
+   * @param recordingId The call.
+   * @returns True while it is.
+   */
+  hasAudio(recordingId: number): boolean {
+    const row = this.db.prepare("SELECT 1 FROM recordings WHERE id = ? AND audio_deleted_at IS NULL AND audio_path IS NOT NULL").get(recordingId);
+    return row !== undefined;
+  }
+
+  /**
+   * Says whether a microphone line was you.
+   * @param lineId The line.
+   * @param notYou True when it wasn't.
+   * @returns Its call, or null when there's no such microphone line.
+   */
+  setLineNotYou(lineId: number, notYou: boolean): number | null {
+    const row = this.db.prepare("SELECT recording_id FROM transcript_lines WHERE id = ? AND side = 'me'").get(lineId) as
+      | { recording_id: number }
+      | undefined;
+    if (!row) {
+      return null;
+    }
+    this.db.prepare("UPDATE transcript_lines SET not_you = ? WHERE id = ?").run(notYou ? 1 : 0, lineId);
+    return Number(row.recording_id);
   }
 
   /**
@@ -229,14 +292,16 @@ export class SpeakerStore {
    */
   listCallLines(recordingId: number): TranscriptLine[] {
     const rows = this.db
-      .prepare("SELECT side, started_at, ended_at, text, speaker_id FROM transcript_lines WHERE recording_id = ? ORDER BY started_at, id")
+      .prepare("SELECT id, side, started_at, ended_at, text, speaker_id, not_you FROM transcript_lines WHERE recording_id = ? ORDER BY started_at, id")
       .all(recordingId) as Record<string, unknown>[];
     return rows.map((row) => ({
+      id: Number(row.id),
       side: row.side === "me" ? "me" : "them",
       start: Date.parse(String(row.started_at)),
       end: Date.parse(String(row.ended_at)),
       text: String(row.text),
       speakerId: row.speaker_id === null ? null : Number(row.speaker_id),
+      notYou: Number(row.not_you) === 1,
     }));
   }
 

@@ -2,18 +2,29 @@ import type { JiraSettings, JiraSettingsInput, Todo, TodoSent } from "../../shar
 import type { SecretStore } from "../store/SecretStore";
 import type { Store } from "../store/Store";
 import { type AdfNode, markdownToAdf, summaryOf } from "./markdownToAdf";
+import type { TodoAction } from "./todoIpc";
 
 /** Where the Jira settings live: the settings table, and the token in the secret store. */
 export const JIRA_KEYS = {
   site: "jira.site",
   email: "jira.email",
   projectKey: "jira.projectKey",
+  /** The ticket types the menu offers, as a JSON list. */
+  issueTypes: "jira.issueTypes",
+  /** The one type saved before there was a list; still offered until the list is saved. */
   issueType: "jira.issueType",
   token: "jira.apiToken",
 } as const;
 
-/** Settings shown before any are saved: QbDVision's Jira, the engineering project, a Task. */
-export const JIRA_DEFAULTS = { site: "https://cherrycircle.atlassian.net", projectKey: "QI", issueType: "Task" };
+/** Settings shown before any are saved: QbDVision's Jira, the engineering project, its everyday ticket types. */
+export const JIRA_DEFAULTS = {
+  site: "https://cherrycircle.atlassian.net",
+  projectKey: "QI",
+  issueTypes: ["Task", "Story (FRS)", "Epic (URS)", "Bug"],
+};
+
+/** The most ticket types the menu offers. */
+const MAX_ISSUE_TYPES = 10;
 
 /** What the Jira code reads and writes. */
 export interface JiraDependencies {
@@ -27,8 +38,21 @@ interface JiraConfig {
   site: string;
   email: string;
   projectKey: string;
-  issueType: string;
   token: string;
+}
+
+/**
+ * The menu entries Jira adds to a TODO: "Make a Jira Task", "Make a Jira Bug"… one per saved ticket type.
+ * @param deps The saved settings and fetch.
+ * @returns The actions, in the order the types were saved.
+ */
+export function jiraActions(deps: JiraDependencies): TodoAction[] {
+  return readJiraSettings(deps).issueTypes.map((issueType) => ({
+    id: `jira:${issueType}`,
+    label: `Make a Jira ${issueType}`,
+    unavailable: () => jiraUnavailable(deps),
+    run: (todo: Todo) => createJiraTicket(deps, todo, issueType),
+  }));
 }
 
 /**
@@ -41,9 +65,55 @@ export function readJiraSettings(deps: Pick<JiraDependencies, "settings" | "secr
     site: deps.settings.getSetting(JIRA_KEYS.site) ?? JIRA_DEFAULTS.site,
     email: deps.settings.getSetting(JIRA_KEYS.email) ?? "",
     projectKey: deps.settings.getSetting(JIRA_KEYS.projectKey) ?? JIRA_DEFAULTS.projectKey,
-    issueType: deps.settings.getSetting(JIRA_KEYS.issueType) ?? JIRA_DEFAULTS.issueType,
+    issueTypes: savedIssueTypes(deps.settings),
     hasToken: deps.secrets.get(JIRA_KEYS.token) !== null,
   };
+}
+
+/**
+ * The saved ticket types: the list once saved, else the one type saved before there was a list, else the defaults.
+ * The defaults are the default project's types (checked against QI), so they're only added to a type saved before
+ * for that same project, never to one someone checked against their own.
+ * @param settings Where they're kept.
+ * @returns The types.
+ */
+function savedIssueTypes(settings: JiraDependencies["settings"]): string[] {
+  const list = settings.getSetting(JIRA_KEYS.issueTypes);
+  if (list !== null) {
+    try {
+      const parsed = JSON.parse(list) as unknown;
+      if (isTypeList(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // A damaged list falls back below.
+    }
+  }
+  const before = settings.getSetting(JIRA_KEYS.issueType);
+  if (before === null) {
+    return JIRA_DEFAULTS.issueTypes;
+  }
+  const site = settings.getSetting(JIRA_KEYS.site) ?? JIRA_DEFAULTS.site;
+  const projectKey = settings.getSetting(JIRA_KEYS.projectKey) ?? JIRA_DEFAULTS.projectKey;
+  if (site === JIRA_DEFAULTS.site && projectKey === JIRA_DEFAULTS.projectKey) {
+    return [before, ...JIRA_DEFAULTS.issueTypes.filter((type) => type !== before)];
+  }
+  return [before];
+}
+
+/**
+ * Whether a saved list follows the rules a list must pass to be saved.
+ * @param value The parsed list.
+ * @returns True when it's 1 to 10 distinct, trimmed, non-empty names of at most 100 characters.
+ */
+function isTypeList(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= MAX_ISSUE_TYPES &&
+    new Set(value).size === value.length &&
+    value.every((type) => typeof type === "string" && type !== "" && type === type.trim() && type.length <= 100)
+  );
 }
 
 /**
@@ -76,19 +146,20 @@ export async function saveJiraSettings(deps: JiraDependencies, value: unknown): 
   if (!token) {
     throw new Error("Paste a Jira API token (id.atlassian.com → Security → API tokens).");
   }
-  const config: JiraConfig = { ...input, token };
+  const config: JiraConfig = { site: input.site, email: input.email, projectKey: input.projectKey, token };
   await jiraRequest(deps.fetch, config, "GET", "/rest/api/3/myself");
   const types = (await jiraRequest(deps.fetch, config, "GET", `/rest/api/3/issue/createmeta/${encodeURIComponent(config.projectKey)}/issuetypes`)) as {
     issueTypes?: { name: string }[];
   };
   const names = (types.issueTypes ?? []).map((type) => type.name);
-  if (!names.includes(config.issueType)) {
-    throw new Error(`${config.projectKey} has no "${config.issueType}" type. It has: ${names.join(", ")}.`);
+  const missing = input.issueTypes.filter((type) => !names.includes(type));
+  if (missing.length > 0) {
+    throw new Error(`${config.projectKey} has no ${missing.map((type) => `"${type}"`).join(" or ")} type. It has: ${names.join(", ")}.`);
   }
   deps.settings.setSetting(JIRA_KEYS.site, config.site);
   deps.settings.setSetting(JIRA_KEYS.email, config.email);
   deps.settings.setSetting(JIRA_KEYS.projectKey, config.projectKey);
-  deps.settings.setSetting(JIRA_KEYS.issueType, config.issueType);
+  deps.settings.setSetting(JIRA_KEYS.issueTypes, JSON.stringify(input.issueTypes));
   if (input.token !== null) {
     deps.secrets.set(JIRA_KEYS.token, input.token);
   }
@@ -100,15 +171,16 @@ export async function saveJiraSettings(deps: JiraDependencies, value: unknown): 
  * formatting and links) the description, plus the call it came from.
  * @param deps The saved settings and fetch.
  * @param todo The item.
+ * @param issueType The type of ticket, e.g. "Story (FRS)".
  * @returns Where it went, e.g. QI-1234 and its address.
  */
-export async function createJiraTicket(deps: JiraDependencies, todo: Todo): Promise<Omit<TodoSent, "at">> {
+export async function createJiraTicket(deps: JiraDependencies, todo: Todo, issueType: string): Promise<Omit<TodoSent, "at">> {
   const config = savedConfig(deps);
   const me = (await jiraRequest(deps.fetch, config, "GET", "/rest/api/3/myself")) as { accountId?: string };
   const created = (await jiraRequest(deps.fetch, config, "POST", "/rest/api/3/issue", {
     fields: {
       project: { key: config.projectKey },
-      issuetype: { name: config.issueType },
+      issuetype: { name: issueType },
       summary: summaryOf(todo.markdown),
       description: describe(todo),
       ...(me.accountId ? { assignee: { accountId: me.accountId } } : {}),
@@ -165,14 +237,16 @@ export function assertJiraSettingsInput(value: unknown): JiraSettingsInput {
   if (!/^[A-Z][A-Z0-9_]{0,19}$/.test(projectKey)) {
     throw new Error("The project key is the letters before a ticket's number, e.g. QI.");
   }
-  const issueType = typeof input.issueType === "string" ? input.issueType.trim() : "";
-  if (!issueType || issueType.length > 100) {
-    throw new Error("Enter the type of ticket to make, e.g. Task.");
+  const issueTypes = Array.isArray(input.issueTypes)
+    ? [...new Set(input.issueTypes.map((type: unknown) => (typeof type === "string" ? type.trim() : "")))]
+    : [];
+  if (issueTypes.length === 0 || issueTypes.length > MAX_ISSUE_TYPES || issueTypes.some((type) => !type || type.length > 100)) {
+    throw new Error(`Enter 1 to ${MAX_ISSUE_TYPES} types of ticket, separated by commas, e.g. Task, Bug.`);
   }
   if (input.token !== null && (typeof input.token !== "string" || !input.token.trim() || input.token.length > 1_000)) {
     throw new Error("Paste a Jira API token, or leave it empty to keep the saved one.");
   }
-  return { site, email, projectKey, issueType, token: input.token === null ? null : input.token.trim() };
+  return { site, email, projectKey, issueTypes, token: input.token === null ? null : input.token.trim() };
 }
 
 /**
@@ -186,7 +260,7 @@ function savedConfig(deps: Pick<JiraDependencies, "settings" | "secrets">): Jira
   if (!settings.email || !token) {
     throw new Error("Set up Jira in Settings first.");
   }
-  return { site: settings.site, email: settings.email, projectKey: settings.projectKey, issueType: settings.issueType, token };
+  return { site: settings.site, email: settings.email, projectKey: settings.projectKey, token };
 }
 
 /**

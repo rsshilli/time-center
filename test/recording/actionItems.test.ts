@@ -204,8 +204,8 @@ describe("actionItems", () => {
 
 describe("readItems", () => {
   const turns: Turn[] = [
-    { side: "them", speakerId: null, start: START, text: "a" },
-    { side: "me", speakerId: null, start: START + MIN, text: "b" },
+    { side: "them", speakerId: null, start: START, text: "a", lines: [] },
+    { side: "me", speakerId: null, start: START + MIN, text: "b", lines: [] },
   ];
 
   it("should drop items with no text, a made-up turn or a repeat, and sort newest first", () => {
@@ -243,9 +243,9 @@ describe("readItems", () => {
 
 describe("latestTurns", () => {
   it("should keep the latest turns that fit", () => {
-    const turns: Turn[] = ["aaaa", "bb", "cc"].map((text, i) => ({ side: "me", speakerId: null, start: i, text }));
+    const turns: Turn[] = ["aaaa", "bb", "cc"].map((text, i) => ({ side: "me", speakerId: null, start: i, text, lines: [] }));
     expect(latestTurns(turns, 5).map((turn) => turn.text)).toEqual(["bb", "cc"]);
-    expect(latestTurns(turns, 1)).toEqual([{ side: "me", speakerId: null, start: 2, text: "c" }]);
+    expect(latestTurns(turns, 1)).toEqual([{ side: "me", speakerId: null, start: 2, text: "c", lines: [] }]);
     expect(latestTurns([], 5)).toEqual([]);
   });
 });

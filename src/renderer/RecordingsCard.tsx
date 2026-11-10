@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CallRecording, RecordingsReport } from "../shared/ipc";
+import { CallAskBox } from "./AskCard";
 import { readableError } from "./CalendarSettings";
 import { ActionItemList } from "./LiveCallCard";
 import { formatClock, groupTurns, transcriptText } from "../shared/transcript";
@@ -91,11 +92,13 @@ export function RecordingsCard({
 }
 
 /**
- * One call: when, what meeting, its state, and its transcript when opened.
+ * One call: when, what meeting and its state, folded. The chevron opens its possible TODOs, its transcript and a
+ * box to ask about it.
  * @param props.recording The call.
  */
 function RecordingItem({ recording }: { recording: CallRecording }) {
   const [open, setOpen] = useState(false);
+  const bodyId = `call-${recording.id}`;
   const [message, setMessage] = useState<string | null>(null);
   const turns = groupTurns(recording.lines, recording.speakers);
 
@@ -119,20 +122,34 @@ function RecordingItem({ recording }: { recording: CallRecording }) {
   };
 
   return (
-    <li className="recording">
+    <li className={open ? "recording open" : "recording"}>
       <div className="recording-head">
+        <button
+          type="button"
+          className="chevron"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          aria-label={open ? "Fold this call" : "Open this call's TODOs, transcript and questions"}
+          onClick={() => setOpen(!open)}
+        >
+          ›
+        </button>
         <span className="meeting-time">
           {formatClock(recording.start)}
           {recording.end !== null && ` – ${formatClock(recording.end)}`}
         </span>
-        <span className="recording-title">{recording.meetingTitle ?? "Call"}</span>
-        <span className="muted">{stateText(recording)}</span>
+        <button
+          type="button"
+          className="recording-title"
+          tabIndex={-1}
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={() => setOpen(!open)}
+        >
+          {recording.meetingTitle ?? "Call"}
+        </button>
+        <span className="muted">{stateText(recording) || todoCount(recording)}</span>
         <span className="recording-actions">
-          {turns.length > 0 && (
-            <button className="link" onClick={() => setOpen(!open)}>
-              {open ? "Hide transcript" : "Transcript"}
-            </button>
-          )}
           {turns.length > 0 && (
             <button className="link" onClick={() => void copy()}>
               Copy
@@ -151,15 +168,47 @@ function RecordingItem({ recording }: { recording: CallRecording }) {
         <p className="muted">Part of this call couldn't be transcribed; it's still in the audio.</p>
       )}
       {message && <p className="message">{message}</p>}
-      {recording.actionItems.length > 0 && (
-        <div className="recording-actions-found">
-          <h3>Possible action items</h3>
-          <ActionItemList items={recording.actionItems} recording={recording} />
+      {open && (
+        <div className="recording-body" id={bodyId}>
+          <section className="recording-actions-found">
+            <h3>Possible TODOs</h3>
+            {recording.actionItems.length > 0 ? (
+              <ActionItemList items={recording.actionItems} recording={recording} />
+            ) : (
+              <p className="muted">None found in this call.</p>
+            )}
+          </section>
+          <section>
+            <h3>Transcript</h3>
+            {recording.lines.length > 0 ? <TranscriptTurns recording={recording} /> : <p className="muted">{stateText(recording) || "Nothing said."}</p>}
+          </section>
+          {turns.length > 0 && (
+            <section>
+              <h3>Ask about this call</h3>
+              {recording.end === null || recording.waitingChunks > 0 ? (
+                <p className="muted">You can ask once the whole call is transcribed.</p>
+              ) : (
+                <CallAskBox recording={recording} />
+              )}
+            </section>
+          )}
         </div>
       )}
-      {open && <TranscriptTurns recording={recording} />}
     </li>
   );
+}
+
+/**
+ * How many possible TODOs a call has, for its folded row.
+ * @param recording The call.
+ * @returns e.g. "2 possible TODOs", or "" when there are none.
+ */
+export function todoCount(recording: CallRecording): string {
+  const count = recording.actionItems.length;
+  if (count === 0) {
+    return "";
+  }
+  return `${count} possible ${count === 1 ? "TODO" : "TODOs"}`;
 }
 
 /**
