@@ -74,6 +74,7 @@ export class TrayController {
         { type: "separator" },
         { label: "Today…", click: () => this.deps.windows.show("dashboard") },
         { label: "Recordings…", click: () => this.deps.windows.show("recordings") },
+        { label: "TODOs…", click: () => this.deps.windows.show("todos") },
         { label: "Settings…", click: () => this.deps.windows.show("settings") },
         { label: "Permissions…", click: () => this.deps.windows.show("permissions") },
         { type: "separator" },

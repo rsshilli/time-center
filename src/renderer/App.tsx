@@ -4,9 +4,10 @@ import { startOfDay } from "./day";
 import { PermissionsScreen } from "./PermissionsScreen";
 import { RecordingsScreen } from "./RecordingsScreen";
 import { SettingsScreen } from "./SettingsScreen";
+import { TodosScreen } from "./TodosScreen";
 
 /** The screens reachable from the tray, keyed by URL hash. */
-type Route = "dashboard" | "recordings" | "permissions" | "settings";
+type Route = "dashboard" | "recordings" | "todos" | "permissions" | "settings";
 
 /** How often the window checks whether midnight has passed while today is showing. */
 const MIDNIGHT_CHECK_MS = 30_000;
@@ -50,6 +51,9 @@ export function App() {
         <a className={route === "recordings" ? "active" : ""} href="#/recordings">
           Recordings
         </a>
+        <a className={route === "todos" ? "active" : ""} href="#/todos">
+          TODOs
+        </a>
         <a className={route === "permissions" ? "active" : ""} href="#/permissions">
           Permissions
         </a>
@@ -60,6 +64,14 @@ export function App() {
       <main>
         {route === "dashboard" && <DashboardScreen at={at} onChangeDay={setAt} />}
         {route === "recordings" && <RecordingsScreen at={at} onChangeDay={setAt} />}
+        {route === "todos" && (
+          <TodosScreen
+            onOpenCall={(callAt) => {
+              setAt(callAt);
+              window.location.hash = "#/recordings";
+            }}
+          />
+        )}
         {route === "permissions" && <PermissionsScreen />}
         {route === "settings" && <SettingsScreen />}
       </main>
@@ -75,6 +87,8 @@ function readRoute(): Route {
   switch (window.location.hash) {
     case "#/recordings":
       return "recordings";
+    case "#/todos":
+      return "todos";
     case "#/permissions":
       return "permissions";
     case "#/settings":

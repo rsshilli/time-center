@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { CALL_FINISHING_MS, type ActionItemsReport, type CallRecording } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
 import { SIDE_NAMES, formatClock, groupTurns } from "../shared/transcript";
+import { escapeMarkdown } from "./todoOrder";
 
 /** How often the card asks for fresh action items; the main process calls Haiku at most once a minute. */
 const ACTION_POLL_MS = 15_000;
@@ -102,7 +103,7 @@ export function LiveCallCard({ recording }: { recording: CallRecording }) {
           {items.items.length === 0 ? (
             <p className="muted">{turns.length === 0 ? "Waiting for the call's first words." : "None yet."}</p>
           ) : (
-            <ActionItemList items={items.items.slice(0, ITEMS_SHOWN)} />
+            <ActionItemList items={items.items.slice(0, ITEMS_SHOWN)} recording={recording} />
           )}
           {problem ? (
             <p className="message">Couldn't check for action items: {problem}</p>
@@ -119,19 +120,56 @@ export function LiveCallCard({ recording }: { recording: CallRecording }) {
 }
 
 /**
- * A list of action items, each with when it was said.
+ * A list of action items, each with when it was said and a button that copies it to the TODO list.
  * @param props.items The items, newest first.
+ * @param props.recording The call they came from, which the TODO links back to.
  */
-export function ActionItemList({ items }: { items: CallRecording["actionItems"] }) {
+export function ActionItemList({ items, recording }: { items: CallRecording["actionItems"]; recording: CallRecording }) {
+  const [added, setAdded] = useState<Set<string>>(new Set());
+  const [problem, setProblem] = useState<string | null>(null);
+
+  /**
+   * Adds an item to the TODO list, linked to this call.
+   * @param item The action item.
+   * @param key Its key in the list.
+   */
+  const addToTodos = async (item: CallRecording["actionItems"][number], key: string) => {
+    // Marked straight away, so a double-click adds it once.
+    setAdded((current) => new Set(current).add(key));
+    try {
+      await window.timeCenter.addTodo({
+        markdown: escapeMarkdown(item.text),
+        source: { recordingId: recording.id, title: recording.meetingTitle ?? "Call", saidAt: item.saidAt },
+      });
+      setProblem(null);
+    } catch (error) {
+      setAdded((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+      setProblem(readableError(error));
+    }
+  };
+
   return (
-    <ul className="action-items">
-      {items.map((item) => (
-        <li key={`${item.saidAt}:${item.text}`}>
-          <span className="action-text">{item.text}</span>
-          <span className="action-time">{formatClock(item.saidAt)}</span>
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="action-items">
+        {items.map((item) => {
+          const key = `${item.saidAt}:${item.text}`;
+          return (
+            <li key={key}>
+              <span className="action-text">{item.text}</span>
+              <span className="action-time">{formatClock(item.saidAt)}</span>
+              <button type="button" className="secondary action-add" disabled={added.has(key)} onClick={() => void addToTodos(item, key)}>
+                {added.has(key) ? "Added ✓" : "Add to TODOs"}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {problem && <p className="error">{problem}</p>}
+    </>
   );
 }
 

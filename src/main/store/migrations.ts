@@ -179,4 +179,20 @@ export const MIGRATIONS: readonly string[] = [
   -- arrive with an earlier time than covered_until; the count notices it.
   ALTER TABLE recording_action_items ADD COLUMN covered_lines INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Your TODO list. markdown is the item as written; position orders the list (smallest first); done_at is set
+  -- when it's ticked. An item added from a call's action items keeps the call (source_*) to link back to it.
+  -- sent is a JSON list of where the item was sent ({ action, label, url, at }), e.g. a Jira ticket.
+  CREATE TABLE todos (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    markdown            TEXT NOT NULL,
+    position            REAL NOT NULL,
+    created_at          TEXT NOT NULL,
+    done_at             TEXT,
+    source_recording_id INTEGER REFERENCES recordings (id) ON DELETE SET NULL,
+    source_title        TEXT,
+    source_said_at      TEXT,
+    sent                TEXT NOT NULL DEFAULT '[]'
+  );
+  `,
 ];

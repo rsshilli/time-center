@@ -37,6 +37,17 @@ const api: TimeCenterApi = {
   getCallQuestions: () => ipcRenderer.invoke(IPC.getCallQuestions),
   transcribeDictation: (wav) => ipcRenderer.invoke(IPC.transcribeDictation, wav),
   refreshActionItems: (recordingId) => ipcRenderer.invoke(IPC.refreshActionItems, recordingId),
+  getTodos: () => ipcRenderer.invoke(IPC.getTodos),
+  addTodo: (todo) => ipcRenderer.invoke(IPC.addTodo, todo),
+  updateTodo: (id, markdown) => ipcRenderer.invoke(IPC.updateTodo, id, markdown),
+  setTodoDone: (id, done) => ipcRenderer.invoke(IPC.setTodoDone, id, done),
+  reorderTodos: (ids) => ipcRenderer.invoke(IPC.reorderTodos, ids),
+  deleteTodo: (id) => ipcRenderer.invoke(IPC.deleteTodo, id),
+  clearDoneTodos: () => ipcRenderer.invoke(IPC.clearDoneTodos),
+  getTodoActions: () => ipcRenderer.invoke(IPC.getTodoActions),
+  runTodoAction: (id, actionId) => ipcRenderer.invoke(IPC.runTodoAction, id, actionId),
+  getJiraSettings: () => ipcRenderer.invoke(IPC.getJiraSettings),
+  saveJiraSettings: (input) => ipcRenderer.invoke(IPC.saveJiraSettings, input),
 };
 
 contextBridge.exposeInMainWorld("timeCenter", api);

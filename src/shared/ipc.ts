@@ -346,6 +346,74 @@ export function screenshotUrl(id: number, size: "thumb" | "full"): string {
   return `${SCREENSHOT_SCHEME}://shot/${id}/${size}`;
 }
 
+/** The call a TODO came from, when it was added from the call's action items. */
+export interface TodoSource {
+  /** Null once the call itself was deleted; the title and time stay. */
+  recordingId: number | null;
+  title: string;
+  /** When it was said in the call. */
+  saidAt: number;
+}
+
+/** A place a TODO was sent, such as the Jira ticket made from it. */
+export interface TodoSent {
+  /** The action that sent it, e.g. "jira". */
+  action: string;
+  /** What to show, e.g. "QI-1234". */
+  label: string;
+  url: string | null;
+  at: number;
+}
+
+/** One item on the TODO list. */
+export interface Todo {
+  id: number;
+  /** The item as Markdown. */
+  markdown: string;
+  createdAt: number;
+  /** When it was ticked; null while it's still to do. */
+  doneAt: number | null;
+  source: TodoSource | null;
+  sent: TodoSent[];
+}
+
+/** A new item: its text, and the call it came from if any. */
+export interface NewTodo {
+  markdown: string;
+  source: TodoSource | null;
+}
+
+/** Something that can be done with an item from its menu, such as making a Jira ticket. */
+export interface TodoActionInfo {
+  id: string;
+  /** The menu label, e.g. "Make a Jira ticket". */
+  label: string;
+  /** Why it can't run yet (e.g. "Set up Jira in Settings first"); null when it's ready. */
+  unavailable: string | null;
+}
+
+/** The Jira settings, as Settings shows them. The token itself never comes back to the window. */
+export interface JiraSettings {
+  /** e.g. "https://cherrycircle.atlassian.net". */
+  site: string;
+  email: string;
+  projectKey: string;
+  issueType: string;
+  hasToken: boolean;
+}
+
+/** Jira settings to save; token null keeps the saved one. */
+export interface JiraSettingsInput {
+  site: string;
+  email: string;
+  projectKey: string;
+  issueType: string;
+  token: string | null;
+}
+
+/** The longest TODO accepted, in characters of Markdown. */
+export const MAX_TODO_CHARS = 20_000;
+
 /** IPC channel names shared by the main process and the preload bridge. */
 export const IPC = {
   getDay: "activity:get-day",
@@ -379,6 +447,17 @@ export const IPC = {
   getCallQuestions: "recordings:questions",
   transcribeDictation: "recordings:dictate",
   refreshActionItems: "recordings:action-items",
+  getTodos: "todos:get",
+  addTodo: "todos:add",
+  updateTodo: "todos:update",
+  setTodoDone: "todos:set-done",
+  reorderTodos: "todos:reorder",
+  deleteTodo: "todos:delete",
+  clearDoneTodos: "todos:clear-done",
+  getTodoActions: "todos:actions",
+  runTodoAction: "todos:run-action",
+  getJiraSettings: "jira:get-settings",
+  saveJiraSettings: "jira:save-settings",
 } as const;
 
 /** The API the preload script exposes to the renderer as `window.timeCenter`. */
@@ -448,4 +527,24 @@ export interface TimeCenterApi {
    * reads a call you're watching; it looks again when there are new words and a minute has passed.
    */
   refreshActionItems(recordingId: number): Promise<ActionItemsReport>;
+  /** The TODO list: items to do in your order, then done items, most recently done first. */
+  getTodos(): Promise<Todo[]>;
+  /** Adds an item at the top of the list. */
+  addTodo(todo: NewTodo): Promise<Todo[]>;
+  /** Replaces an item's text. */
+  updateTodo(id: number, markdown: string): Promise<Todo[]>;
+  /** Ticks or unticks an item. */
+  setTodoDone(id: number, done: boolean): Promise<Todo[]>;
+  /** Puts the items still to do in this order. */
+  reorderTodos(ids: number[]): Promise<Todo[]>;
+  deleteTodo(id: number): Promise<Todo[]>;
+  /** Deletes every done item. */
+  clearDoneTodos(): Promise<Todo[]>;
+  /** What an item's menu offers, and whether each is ready. */
+  getTodoActions(): Promise<TodoActionInfo[]>;
+  /** Runs a menu action on an item (e.g. makes a Jira ticket) and returns the list with it recorded. */
+  runTodoAction(id: number, actionId: string): Promise<Todo[]>;
+  getJiraSettings(): Promise<JiraSettings>;
+  /** Saves the Jira settings after checking them against Jira; throws with Jira's answer when they don't work. */
+  saveJiraSettings(input: JiraSettingsInput): Promise<JiraSettings>;
 }

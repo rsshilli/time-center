@@ -1,8 +1,9 @@
 import { join } from "node:path";
-import { BrowserWindow } from "electron";
+import { pathToFileURL } from "node:url";
+import { BrowserWindow, shell } from "electron";
 
 /** The screens the single app window can show. */
-export type Screen = "dashboard" | "recordings" | "permissions" | "settings";
+export type Screen = "dashboard" | "recordings" | "todos" | "permissions" | "settings";
 
 /**
  * Owns the one app window. It is created when needed and destroyed (not hidden) when closed, so the
@@ -47,6 +48,17 @@ export class WindowManager {
         nodeIntegration: false,
       },
     });
+    // A link clicked in a TODO opens in your browser; the window itself never leaves the app or opens another.
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      openIfExternal(url);
+      return { action: "deny" };
+    });
+    window.webContents.on("will-navigate", (event, url) => {
+      if (!isAppPage(url)) {
+        event.preventDefault();
+        openIfExternal(url);
+      }
+    });
     window.on("closed", () => {
       this.window = null;
     });
@@ -65,5 +77,47 @@ export class WindowManager {
       return;
     }
     await window.loadFile(join(__dirname, "../renderer/index.html"), { hash: `/${screen}` });
+  }
+}
+
+/**
+ * Opens a web or email link in the default app; anything else (file:, javascript:, custom schemes) is ignored.
+ * @param url The link.
+ */
+function openIfExternal(url: string): void {
+  if (isExternalLink(url)) {
+    void shell.openExternal(url);
+  }
+}
+
+/**
+ * Whether a link is one to hand to the browser or mail app.
+ * @param url The link.
+ * @returns True for http, https and mailto.
+ */
+export function isExternalLink(url: string): boolean {
+  try {
+    return ["http:", "https:", "mailto:"].includes(new URL(url).protocol) && !isAppPage(url);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a link is the app's own window page: the Vite dev server's origin during `npm run dev`, or the
+ * built renderer's index.html. The window may only ever load these.
+ * @param url The link.
+ * @returns True for the app's own page.
+ */
+export function isAppPage(url: string): boolean {
+  try {
+    const target = new URL(url);
+    const devServerUrl = process.env.ELECTRON_RENDERER_URL;
+    if (devServerUrl) {
+      return target.origin === new URL(devServerUrl).origin;
+    }
+    return target.protocol === "file:" && target.pathname === pathToFileURL(join(__dirname, "../renderer/index.html")).pathname;
+  } catch {
+    return false;
   }
 }

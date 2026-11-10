@@ -55,6 +55,9 @@ import { handleScreenshotScheme, registerScreenshotScheme } from "./screenshots/
 import { enableStartAtLoginOnce } from "./startAtLogin";
 import { SecretStore } from "./store/SecretStore";
 import { Store } from "./store/Store";
+import { createJiraTicket, jiraUnavailable, readJiraSettings, saveJiraSettings } from "./todos/jira";
+import { registerTodoIpc } from "./todos/todoIpc";
+import { TodoStore } from "./todos/TodoStore";
 import { TrayController } from "./TrayController";
 import { WindowManager, type Screen } from "./WindowManager";
 
@@ -229,6 +232,21 @@ async function main(): Promise<void> {
     },
     actionItems,
     refreshActionItems: (recordingId) => actionItemFinder.refresh(recordingId),
+    now: () => Date.now(),
+  });
+  const jira = { settings: store, secrets: new SecretStore(store, safeStorage), fetch };
+  registerTodoIpc({
+    store: new TodoStore(store.db),
+    actions: [
+      {
+        id: "jira",
+        label: "Make a Jira ticket",
+        unavailable: () => jiraUnavailable(jira),
+        run: (todo) => createJiraTicket(jira, todo),
+      },
+    ],
+    getJiraSettings: () => readJiraSettings(jira),
+    saveJiraSettings: (input) => saveJiraSettings(jira, input),
     now: () => Date.now(),
   });
   handleScreenshotScheme(activity);
@@ -479,14 +497,17 @@ function createPermissions(store: Store): Permissions {
 }
 
 /**
- * Picks the screen a second launch asked for with `--open=recordings`, `--open=permissions` or
- * `--open=settings`; the dashboard otherwise.
+ * Picks the screen a second launch asked for with `--open=recordings`, `--open=todos`, `--open=permissions`
+ * or `--open=settings`; the dashboard otherwise.
  * @param argv The second instance's command line.
  * @returns The screen to show.
  */
 function screenFromArgs(argv: string[]): Screen {
   if (argv.includes("--open=recordings")) {
     return "recordings";
+  }
+  if (argv.includes("--open=todos")) {
+    return "todos";
   }
   if (argv.includes("--open=permissions")) {
     return "permissions";

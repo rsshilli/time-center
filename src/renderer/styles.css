@@ -880,6 +880,17 @@ button.link.total-name {
   padding: 5px 10px;
 }
 
+.action-items li:has(.action-add) {
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+}
+
+button.action-add {
+  padding: 2px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* Category rules */
 
 .rules {
@@ -969,6 +980,10 @@ button.link.total-name {
   margin-top: 14px;
 }
 
+.jira-settings {
+  margin-bottom: 32px;
+}
+
 .calendar-settings h2 {
   font-size: 15px;
   margin: 22px 0 4px;
@@ -1026,4 +1041,295 @@ button.link.total-name {
 
 .meeting-actions button {
   padding: 3px 10px;
+}
+
+/* TODO tab */
+
+.todo-new {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.todo-new .todo-editor {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.todo-row {
+  display: grid;
+  grid-template-columns: 18px 20px 1fr auto;
+  gap: 8px;
+  align-items: start;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.todo-row:first-child {
+  border-top: none;
+}
+
+.todo-row.dragging {
+  opacity: 0.4;
+}
+
+.todo-row.drop-target {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.todo-row.done .ProseMirror {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.todo-handle {
+  color: var(--muted);
+  cursor: grab;
+  user-select: none;
+  line-height: 24px;
+  letter-spacing: -3px;
+  visibility: hidden;
+}
+
+.todo-row:hover .todo-handle {
+  visibility: visible;
+}
+
+.todo-check {
+  margin: 6px 0 0;
+}
+
+.todo-body {
+  min-width: 0;
+}
+
+.todo-editor .ProseMirror {
+  outline: none;
+  line-height: 1.45;
+  padding: 2px 0;
+  overflow-wrap: anywhere;
+}
+
+.todo-editor .ProseMirror > :first-child {
+  margin-top: 0;
+}
+
+.todo-editor .ProseMirror > :last-child {
+  margin-bottom: 0;
+}
+
+.todo-editor .ProseMirror p {
+  margin: 0;
+}
+
+.todo-editor .ProseMirror ul,
+.todo-editor .ProseMirror ol {
+  margin: 2px 0;
+  padding-left: 22px;
+}
+
+/* The item sits in the TODO list, so its own lists would otherwise get second-level circles. */
+.todo-editor .ProseMirror > ul {
+  list-style: disc;
+}
+
+.todo-editor .ProseMirror > ol {
+  list-style: decimal;
+}
+
+.todo-editor .ProseMirror h1,
+.todo-editor .ProseMirror h2,
+.todo-editor .ProseMirror h3 {
+  font-size: 15px;
+  margin: 4px 0 2px;
+}
+
+.todo-editor .ProseMirror code {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 12.5px;
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.todo-editor .ProseMirror pre {
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  border-radius: 6px;
+  padding: 6px 8px;
+  overflow-x: auto;
+}
+
+.todo-editor .ProseMirror pre code {
+  background: none;
+  padding: 0;
+}
+
+.todo-editor .ProseMirror blockquote {
+  margin: 2px 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+}
+
+.todo-editor .ProseMirror a {
+  color: var(--accent);
+}
+
+.todo-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.todo-toolbar,
+.todo-link-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.todo-toolbar button {
+  padding: 2px 8px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.todo-toolbar button.on {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: var(--accent);
+}
+
+.todo-link-info {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.todo-link-info a {
+  color: var(--accent);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-link-bar input {
+  flex: 1;
+  min-width: 200px;
+  font: inherit;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.todo-link-bar button {
+  padding: 4px 12px;
+}
+
+.todo-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+button.link.todo-source {
+  color: var(--muted);
+}
+
+.todo-sent {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.todo-menu {
+  position: relative;
+}
+
+.todo-menu-button {
+  padding: 0 8px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.todo-menu-button:hover {
+  border-color: var(--line);
+}
+
+.todo-menu-list {
+  position: absolute;
+  right: 0;
+  top: 26px;
+  z-index: 10;
+  display: grid;
+  min-width: 220px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 14%);
+}
+
+.todo-menu-list button {
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+  padding: 6px 10px;
+}
+
+.todo-menu-list button:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.todo-menu-list button.danger {
+  color: var(--bad);
+}
+
+.todo-empty {
+  padding: 8px 2px;
+}
+
+.todo-done {
+  margin-top: 22px;
+}
+
+.todo-done summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.todo-done > button {
+  margin-top: 10px;
 }

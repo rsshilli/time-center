@@ -147,7 +147,7 @@ function RecordingItem({ recording }: { recording: CallRecording }) {
       {recording.actionItems.length > 0 && (
         <div className="recording-actions-found">
           <h3>Possible action items</h3>
-          <ActionItemList items={recording.actionItems} />
+          <ActionItemList items={recording.actionItems} recording={recording} />
         </div>
       )}
       {open && (

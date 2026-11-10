@@ -1,0 +1,150 @@
+import { ipcMain } from "electron";
+import { IPC, MAX_TODO_CHARS, type NewTodo, type Todo, type TodoActionInfo, type TodoSent, type TodoSource } from "../../shared/ipc";
+import { assertMoment, assertRowId } from "../ipcHandlers";
+import type { TodoStore } from "./TodoStore";
+
+/**
+ * Something an item's menu can do with it, such as making a Jira ticket. A new destination ("Send to Claude
+ * Desktop") is one more of these in the list handed to registerTodoIpc.
+ */
+export interface TodoAction {
+  /** Stable id, saved with each item it was used on. */
+  id: string;
+  /** The menu label. */
+  label: string;
+  /** Why it can't run yet, or null when it can. */
+  unavailable(): string | null;
+  /** Sends the item; returns where it went (the time is added for it). */
+  run(todo: Todo): Promise<Omit<TodoSent, "at">>;
+}
+
+/** What the TODO requests are answered from. */
+export interface TodoIpcDependencies {
+  store: TodoStore;
+  actions: TodoAction[];
+  /** Jira's settings, read and saved. */
+  getJiraSettings(): unknown;
+  saveJiraSettings(input: unknown): Promise<unknown>;
+  now(): number;
+}
+
+/**
+ * Answers the TODO tab's requests. Each change answers with the whole list, so the window never shows a
+ * stale order.
+ * @param deps The services to answer from.
+ */
+export function registerTodoIpc(deps: TodoIpcDependencies): void {
+  const list = () => deps.store.listTodos();
+  ipcMain.handle(IPC.getTodos, list);
+  ipcMain.handle(IPC.addTodo, (_event, todo: unknown) => {
+    deps.store.addTodo(assertNewTodo(todo), deps.now());
+    return list();
+  });
+  ipcMain.handle(IPC.updateTodo, (_event, id: unknown, markdown: unknown) => {
+    deps.store.updateTodo(assertRowId(id), assertMarkdown(markdown));
+    return list();
+  });
+  ipcMain.handle(IPC.setTodoDone, (_event, id: unknown, done: unknown) => {
+    if (typeof done !== "boolean") {
+      throw new Error("Say whether the item is done.");
+    }
+    deps.store.setDone(assertRowId(id), done, deps.now());
+    return list();
+  });
+  ipcMain.handle(IPC.reorderTodos, (_event, ids: unknown) => {
+    if (!Array.isArray(ids) || ids.length > 10_000) {
+      throw new Error("Not a list of items.");
+    }
+    deps.store.reorder(ids.map(assertRowId));
+    return list();
+  });
+  ipcMain.handle(IPC.deleteTodo, (_event, id: unknown) => {
+    deps.store.deleteTodo(assertRowId(id));
+    return list();
+  });
+  ipcMain.handle(IPC.clearDoneTodos, () => {
+    deps.store.clearDone();
+    return list();
+  });
+  ipcMain.handle(IPC.getTodoActions, () => describeActions(deps.actions));
+  ipcMain.handle(IPC.runTodoAction, async (_event, id: unknown, actionId: unknown) => {
+    await runTodoAction(deps, assertRowId(id), actionId);
+    return list();
+  });
+  ipcMain.handle(IPC.getJiraSettings, () => deps.getJiraSettings());
+  ipcMain.handle(IPC.saveJiraSettings, (_event, input: unknown) => deps.saveJiraSettings(input));
+}
+
+/**
+ * What each action is called and whether it's ready.
+ * @param actions The actions.
+ * @returns Their menu entries.
+ */
+export function describeActions(actions: TodoAction[]): TodoActionInfo[] {
+  return actions.map((action) => ({ id: action.id, label: action.label, unavailable: action.unavailable() }));
+}
+
+/**
+ * Runs a menu action on an item and records where it went.
+ * @param deps The list and the actions.
+ * @param id The item.
+ * @param actionId The action the window asked for.
+ */
+export async function runTodoAction(deps: Pick<TodoIpcDependencies, "store" | "actions" | "now">, id: number, actionId: unknown): Promise<void> {
+  const action = deps.actions.find((candidate) => candidate.id === actionId);
+  if (!action) {
+    throw new Error("That isn't something an item can do.");
+  }
+  const unavailable = action.unavailable();
+  if (unavailable) {
+    throw new Error(unavailable);
+  }
+  const todo = deps.store.getTodo(id);
+  if (!todo) {
+    throw new Error("That item is no longer on your list.");
+  }
+  const sent = await action.run(todo);
+  deps.store.addSent(id, { ...sent, action: action.id, at: deps.now() });
+}
+
+/**
+ * Checks a new item sent by the window.
+ * @param value What it sent.
+ * @returns The item, typed.
+ */
+export function assertNewTodo(value: unknown): NewTodo {
+  const todo = value as Partial<NewTodo> | null;
+  if (typeof todo !== "object" || todo === null) {
+    throw new Error("Not an item.");
+  }
+  return { markdown: assertMarkdown(todo.markdown), source: todo.source === null || todo.source === undefined ? null : assertSource(todo.source) };
+}
+
+/**
+ * Checks an item's text.
+ * @param value What the window sent.
+ * @returns The text, without the blank lines and spaces around it.
+ */
+function assertMarkdown(value: unknown): string {
+  if (typeof value !== "string" || value.length > MAX_TODO_CHARS) {
+    throw new Error(`An item can be up to ${MAX_TODO_CHARS} characters.`);
+  }
+  return value.trim();
+}
+
+/**
+ * Checks the call an item came from.
+ * @param value What the window sent.
+ * @returns The source.
+ */
+function assertSource(value: unknown): TodoSource {
+  const source = value as Partial<TodoSource>;
+  if (typeof source !== "object" || typeof source.title !== "string" || source.title.length > 500) {
+    throw new Error("Not a call.");
+  }
+  return {
+    recordingId: source.recordingId === null ? null : assertRowId(source.recordingId),
+    title: source.title,
+    saidAt: assertMoment(source.saidAt),
+  };
+}

@@ -4,10 +4,10 @@ A Mac menu-bar app that shows where your day went. It joins your meetings on tim
 transcribes your calls.
 
 Everything stays on your Mac: the activity log, screenshots, recordings and transcripts. Nothing leaves
-it except four things, and only when you set them up or use them: a weekly backup of the database to
+it except five things, and only when you set them up or use them: a weekly backup of the database to
 your own S3 bucket, meeting titles sent to Claude to sort them into types, the transcripts of the calls
-you ask Claude a question about, and the transcript of a call you're watching live on the Recordings tab,
-which Claude reads for action items.
+you ask Claude a question about, the transcript of a call you're watching live on the Recordings tab,
+which Claude reads for action items, and a TODO you choose to make into a Jira ticket.
 
 ![The Today tab: a timeline of the day by app, and time per category, app, project, website and meeting](docs/screenshots/today.png)
 
@@ -41,8 +41,13 @@ which Claude reads for action items.
   day's calls, or all your calls. For all calls, the app searches the transcripts for your question's
   words and sends only the calls that match. Claude Sonnet answers, and your questions and answers are
   kept below the box.
+- **TODOs tab.** Your TODO list. Type an item and press Enter; it formats as you type (**bold**, _italics_,
+  `code`, lists) and is saved as Markdown. Select words and press ⌘K to link them, or paste an address over
+  them. Tick items off (they fold into a Done section), drag ⋮⋮ to reorder, and use an item's ⋯ menu to
+  make a Jira ticket from it. Each action item from a call has an **Add to TODOs** button, and the TODO links
+  back to the call.
 - **Settings.** Category rules (with a filter box to find one), apps to ignore, your calendar, meeting
-  types and the weekly backup.
+  types, Jira and the weekly backup.
 
 ### Privacy defaults
 
@@ -132,6 +137,15 @@ and sign in. (To replace the shared client, put the new one in your `.env` and r
 
 The app asks only for read-only calendar access (`calendar.readonly`).
 
+### Jira (making tickets from TODOs)
+
+Under **Settings → Jira**, enter your Jira site (QbDVision's is filled in), the email you sign in with, an
+API token (id.atlassian.com → Security → API tokens), the project key and the type of ticket (QI and Task
+to start). **Check and save** tries them against Jira before saving. The token is encrypted with a key in
+your Mac's Keychain and never shown again. A TODO's ⋯ → **Make a Jira ticket** creates the ticket assigned
+to you: the item's first line is the summary, and the whole item, with its formatting, links and the call
+it came from, is the description. The ticket's number then shows under the item as a link.
+
 ### Weekly backup to S3
 
 Under **Settings → Weekly backup**, enter a bucket, its region and an AWS profile name from `~/.aws`. You
@@ -160,7 +174,7 @@ All in `~/Library/Application Support/Time Center/`:
 
 | Path | What |
 |------|------|
-| `time-center.db` | The SQLite database: activity, meetings, rules, transcripts, action items, your questions and answers |
+| `time-center.db` | The SQLite database: activity, meetings, rules, transcripts, action items, TODOs, your questions and answers |
 | `screenshots/YYYY-MM-DD/` | Once-a-minute screenshots, kept 30 days |
 | `recordings/` | One `.m4a` per call, kept 30 days |
 | `models/` | The Whisper speech model |
