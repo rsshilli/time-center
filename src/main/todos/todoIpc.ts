@@ -1,5 +1,16 @@
 import { ipcMain } from "electron";
-import { IPC, MAX_TODO_CHARS, type NewTodo, type Todo, type TodoActionInfo, type TodoSent, type TodoSource } from "../../shared/ipc";
+import {
+  IPC,
+  MAX_TODO_CHARS,
+  type NewTodo,
+  TODO_SECTIONS,
+  type Todo,
+  type TodoActionInfo,
+  type TodoLayout,
+  type TodoSection,
+  type TodoSent,
+  type TodoSource,
+} from "../../shared/ipc";
 import { assertMoment, assertRowId } from "../ipcHandlers";
 import type { TodoStore } from "./TodoStore";
 
@@ -51,11 +62,8 @@ export function registerTodoIpc(deps: TodoIpcDependencies): void {
     deps.store.setDone(assertRowId(id), done, deps.now());
     return list();
   });
-  ipcMain.handle(IPC.reorderTodos, (_event, ids: unknown) => {
-    if (!Array.isArray(ids) || ids.length > 10_000) {
-      throw new Error("Not a list of items.");
-    }
-    deps.store.reorder(ids.map(assertRowId));
+  ipcMain.handle(IPC.arrangeTodos, (_event, layout: unknown) => {
+    deps.store.arrange(assertLayout(layout));
     return list();
   });
   ipcMain.handle(IPC.deleteTodo, (_event, id: unknown) => {
@@ -117,7 +125,32 @@ export function assertNewTodo(value: unknown): NewTodo {
   if (typeof todo !== "object" || todo === null) {
     throw new Error("Not an item.");
   }
-  return { markdown: assertMarkdown(todo.markdown), source: todo.source === null || todo.source === undefined ? null : assertSource(todo.source) };
+  return {
+    markdown: assertMarkdown(todo.markdown),
+    section: assertSection(todo.section),
+    source: todo.source === null || todo.source === undefined ? null : assertSource(todo.source),
+  };
+}
+
+/**
+ * Checks the sections and order sent by the window after a drag.
+ * @param value What it sent.
+ * @returns Each section's items, typed.
+ */
+export function assertLayout(value: unknown): TodoLayout {
+  const layout = value as Partial<Record<TodoSection, unknown>> | null;
+  if (typeof layout !== "object" || layout === null) {
+    throw new Error("Not a list of items.");
+  }
+  const checked = {} as TodoLayout;
+  for (const section of TODO_SECTIONS) {
+    const ids = layout[section];
+    if (!Array.isArray(ids) || ids.length > 10_000) {
+      throw new Error("Not a list of items.");
+    }
+    checked[section] = ids.map(assertRowId);
+  }
+  return checked;
 }
 
 /**
@@ -130,6 +163,18 @@ function assertMarkdown(value: unknown): string {
     throw new Error(`An item can be up to ${MAX_TODO_CHARS} characters.`);
   }
   return value.trim();
+}
+
+/**
+ * Checks which section a new item goes in.
+ * @param value What the window sent.
+ * @returns The section.
+ */
+function assertSection(value: unknown): TodoSection {
+  if (!TODO_SECTIONS.includes(value as TodoSection)) {
+    throw new Error("An item goes in Work or Personal.");
+  }
+  return value as TodoSection;
 }
 
 /**

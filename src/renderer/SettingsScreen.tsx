@@ -5,6 +5,7 @@ import { IgnoredAppsEditor } from "./IgnoredAppsEditor";
 import { JiraSettings } from "./JiraSettings";
 import { MeetingTypeSettings } from "./MeetingTypeSettings";
 import { RulesEditor } from "./RulesEditor";
+import { VoiceSettings } from "./VoiceSettings";
 
 /**
  * Settings for the weekly backup to Amazon S3: which bucket, region and `~/.aws` profile to use, an
@@ -79,6 +80,7 @@ export function SettingsScreen() {
       <CalendarSettings />
       <MeetingTypeSettings />
       <JiraSettings />
+      <VoiceSettings />
       <h1>Weekly backup</h1>
       <p className="lead">
         Once a week, Time Center copies its database (your activity, meetings, transcripts and TODOs) to an

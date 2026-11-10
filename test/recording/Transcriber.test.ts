@@ -11,17 +11,24 @@ import type { WhisperSegment } from "../../src/main/recording/whisper";
 function setUp(
   run: (wav: string) => Promise<WhisperSegment[]>,
   prepare: () => Promise<{ whisper: string; model: string }> = async () => ({ whisper: "w", model: "m" }),
-  insertLines: (id: number, lines: TranscriptLine[]) => void = () => {},
+  insertLines: (id: number, lines: Omit<TranscriptLine, "speakerId">[]) => void = () => {},
 ) {
-  const stored: { id: number; lines: TranscriptLine[] }[] = [];
+  const stored: { id: number; lines: Omit<TranscriptLine, "speakerId">[] }[] = [];
   const removed: string[] = [];
   const setAside: string[] = [];
+  /** What the speaker service was given, and whether the chunk was still on disk then. */
+  const voiced: { wav: string; ids: number[]; stillThere: boolean }[] = [];
+  let nextId = 1;
   const transcriber = new Transcriber({
     store: {
       insertLines: (id, lines) => {
         insertLines(id, lines);
         stored.push({ id, lines });
+        return lines.map(() => nextId++);
       },
+    },
+    onLines: async (_id, chunk, lines) => {
+      voiced.push({ wav: chunk.wav, ids: lines.map((line) => line.id), stillThere: !removed.includes(chunk.wav) });
     },
     prepare,
     run: (_whisper, _model, wav) => run(wav),
@@ -35,7 +42,7 @@ function setUp(
     onChange: () => {},
     log: () => {},
   });
-  return { transcriber, stored, removed, setAside };
+  return { transcriber, stored, removed, setAside, voiced };
 }
 
 /** Lets queued promise callbacks run. */
@@ -60,6 +67,16 @@ describe("Transcriber", () => {
     expect(most).toBe(1);
     expect(stored.map((entry) => entry.lines[0].text)).toEqual(["said in /a.wav", "said in /b.wav"]);
     expect(transcriber.waiting(1)).toBe(0);
+  });
+
+  it("should hand each chunk's stored lines to the speaker service before deleting the chunk", async () => {
+    const { transcriber, removed, voiced } = setUp(async () => [
+      { from: 0, to: 900, text: "one" },
+      { from: 1000, to: 2000, text: "two" },
+    ]);
+    transcriber.add(1, { wav: "/them.wav", side: "them", t0: 0 });
+    await vi.waitFor(() => expect(removed).toEqual(["/them.wav"]));
+    expect(voiced).toEqual([{ wav: "/them.wav", ids: [1, 2], stillThere: true }]);
   });
 
   it("should set aside a chunk whisper fails on and carry on with the next", async () => {
@@ -149,6 +166,6 @@ describe("toLines", () => {
       { from: 3000, to: 4000, text: " (music)" },
       { from: 4000, to: 4500, text: "  " },
     ]);
-    expect(lines).toEqual([{ side: "them", start: 10_000, end: 12_000, text: "Hello there." }]);
+    expect(lines).toEqual([{ side: "them", start: 10_000, end: 12_000, text: "Hello there.", speakerId: null }]);
   });
 });

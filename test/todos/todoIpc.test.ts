@@ -1,7 +1,7 @@
 import { MAX_TODO_CHARS } from "../../src/shared/ipc";
 import { Store } from "../../src/main/store/Store";
 import { TodoStore } from "../../src/main/todos/TodoStore";
-import { type TodoAction, assertNewTodo, describeActions, runTodoAction } from "../../src/main/todos/todoIpc";
+import { type TodoAction, assertLayout, assertNewTodo, describeActions, runTodoAction } from "../../src/main/todos/todoIpc";
 
 const NOW = new Date(2026, 10, 10, 9).getTime();
 
@@ -27,7 +27,7 @@ describe("todoIpc", () => {
   });
 
   it("should run an action on an item and record where it went, under the action's own id", async () => {
-    const id = todos.addTodo({ markdown: "a", source: null }, NOW);
+    const id = todos.addTodo({ markdown: "a", section: "work", source: null }, NOW);
     const jira = action(null);
 
     await runTodoAction({ store: todos, actions: [jira], now: () => NOW }, id, "jira");
@@ -37,7 +37,7 @@ describe("todoIpc", () => {
   });
 
   it("should refuse an unknown action, one that isn't set up, or a deleted item, without running anything", async () => {
-    const id = todos.addTodo({ markdown: "a", source: null }, NOW);
+    const id = todos.addTodo({ markdown: "a", section: "work", source: null }, NOW);
     const notReady = action("Set up Jira in Settings first.");
     const deps = { store: todos, actions: [notReady], now: () => NOW };
 
@@ -53,15 +53,27 @@ describe("todoIpc", () => {
     ]);
   });
 
-  it("should accept a new item with or without a call, and refuse one too long or with a bad call", () => {
-    expect(assertNewTodo({ markdown: "a" })).toEqual({ markdown: "a", source: null });
-    expect(assertNewTodo({ markdown: "a", source: { recordingId: 3, title: "Sync", saidAt: NOW } })).toEqual({
+  it("should accept a new item with or without a call, and refuse one too long, with a bad call or no section", () => {
+    expect(assertNewTodo({ markdown: "a", section: "personal" })).toEqual({ markdown: "a", section: "personal", source: null });
+    expect(assertNewTodo({ markdown: "a", section: "work", source: { recordingId: 3, title: "Sync", saidAt: NOW } })).toEqual({
       markdown: "a",
+      section: "work",
       source: { recordingId: 3, title: "Sync", saidAt: NOW },
     });
-    expect(() => assertNewTodo({ markdown: "x".repeat(MAX_TODO_CHARS + 1) })).toThrow(/up to/);
-    expect(() => assertNewTodo({ markdown: 3 })).toThrow(/up to/);
-    expect(() => assertNewTodo({ markdown: "a", source: { recordingId: 3, saidAt: NOW } })).toThrow(/Not a call/);
-    expect(() => assertNewTodo({ markdown: "a", source: { recordingId: -1, title: "x", saidAt: NOW } })).toThrow();
+    expect(() => assertNewTodo({ markdown: "x".repeat(MAX_TODO_CHARS + 1), section: "work" })).toThrow(/up to/);
+    expect(() => assertNewTodo({ markdown: 3, section: "work" })).toThrow(/up to/);
+    expect(() => assertNewTodo({ markdown: "a", section: "work", source: { recordingId: 3, saidAt: NOW } })).toThrow(/Not a call/);
+    expect(() => assertNewTodo({ markdown: "a", section: "work", source: { recordingId: -1, title: "x", saidAt: NOW } })).toThrow();
+    expect(() => assertNewTodo({ markdown: "a" })).toThrow(/Work or Personal/);
+    expect(() => assertNewTodo({ markdown: "a", section: "hobby" })).toThrow(/Work or Personal/);
+  });
+});
+
+describe("assertLayout", () => {
+  it("should accept both sections' ids and refuse a missing section or a bad id", () => {
+    expect(assertLayout({ work: [1, 2], personal: [3] })).toEqual({ work: [1, 2], personal: [3] });
+    expect(() => assertLayout({ work: [1] })).toThrow(/Not a list/);
+    expect(() => assertLayout([1, 2])).toThrow(/Not a list/);
+    expect(() => assertLayout({ work: [1], personal: ["x"] })).toThrow();
   });
 });

@@ -13,6 +13,7 @@ import {
 import { buildRecordingsReport } from "../../src/main/recording/recordingIpc";
 import type { CalendarEvent } from "../../src/main/calendar/meetingLinks";
 import type { AudioChunk } from "../../src/main/recording/recorderProcess";
+import { SpeakerStore } from "../../src/main/speakers/SpeakerStore";
 import { Store } from "../../src/main/store/Store";
 
 const NOON = new Date(2026, 10, 6, 12).getTime();
@@ -74,6 +75,7 @@ describe("RecordingStore", () => {
         listMeetings: () => meetings,
         countUnread: () => 0,
         actionItems: { getItems: (id) => ({ recordingId: id, items: [{ text: "You: book it", saidAt: NOON }], coveredUntil: NOON, coveredLines: 1, checkedAt: NOON }) },
+        speakers: new SpeakerStore(store.db),
         now: () => NOON + 20 * MIN,
       },
       NOON,
@@ -85,6 +87,8 @@ describe("RecordingStore", () => {
         waitingChunks: 2,
         audioKept: true,
         actionItems: [{ text: "You: book it", saidAt: NOON }],
+        speakers: [],
+        nameChoices: ["Yash"],
       }),
     ]);
   });

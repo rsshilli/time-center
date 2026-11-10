@@ -1,9 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { NewTodo, Todo, TodoSent } from "../../shared/ipc";
+import { type NewTodo, TODO_SECTIONS, type Todo, type TodoLayout, type TodoSent } from "../../shared/ipc";
 
 /**
- * The todos table (migration 13): your TODO list. Items still to do are kept in your order (position);
- * done items sort after them, most recently done first.
+ * The todos table (migrations 13, 16): your TODO list. Items still to do are kept in your order (position)
+ * within their section (Work or Personal); done items sort after them, most recently done first.
  */
 export class TodoStore {
   /** @param db The open database. */
@@ -39,11 +39,12 @@ export class TodoStore {
   addTodo(todo: NewTodo, now: number): number {
     const result = this.db
       .prepare(
-        `INSERT INTO todos (markdown, position, created_at, source_recording_id, source_title, source_said_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO todos (markdown, section, position, created_at, source_recording_id, source_title, source_said_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         todo.markdown,
+        todo.section,
         this.topPosition() - 1,
         new Date(now).toISOString(),
         todo.source?.recordingId ?? null,
@@ -76,19 +77,23 @@ export class TodoStore {
   }
 
   /**
-   * Puts the items still to do in this order.
-   * @param ids Every item still to do, in the new order.
+   * Puts the items still to do in these sections, in this order; dragging an item into the other section is
+   * the same call.
+   * @param layout Every item still to do, each in exactly one section.
    */
-  reorder(ids: number[]): void {
+  arrange(layout: TodoLayout): void {
+    const ids = TODO_SECTIONS.flatMap((section) => layout[section]);
     const open = (this.db.prepare("SELECT id FROM todos WHERE done_at IS NULL").all() as { id: number }[]).map((row) => Number(row.id));
     const same = ids.length === open.length && new Set(ids).size === ids.length && ids.every((id) => open.includes(id));
     if (!same) {
       throw new Error("The list changed while you were dragging; try again.");
     }
-    const update = this.db.prepare("UPDATE todos SET position = ? WHERE id = ?");
+    const update = this.db.prepare("UPDATE todos SET section = ?, position = ? WHERE id = ?");
     this.db.exec("BEGIN");
     try {
-      ids.forEach((id, index) => update.run(index, id));
+      for (const section of TODO_SECTIONS) {
+        layout[section].forEach((id, index) => update.run(section, index, id));
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -151,6 +156,7 @@ function toTodo(row: Record<string, unknown>): Todo {
   return {
     id: Number(row.id),
     markdown: String(row.markdown),
+    section: row.section === "personal" ? "personal" : "work",
     createdAt: Date.parse(String(row.created_at)),
     doneAt: row.done_at === null ? null : Date.parse(String(row.done_at)),
     source:

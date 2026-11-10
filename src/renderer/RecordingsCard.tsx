@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CallRecording, RecordingsReport } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
 import { ActionItemList } from "./LiveCallCard";
-import { SIDE_NAMES, formatClock, groupTurns, transcriptText } from "../shared/transcript";
+import { formatClock, groupTurns, transcriptText } from "../shared/transcript";
+import { SPEAKERS_CHANGED, TranscriptTurns } from "./TranscriptTurns";
 
 /** How often the day's calls are re-read while a call is recording or being transcribed. */
 const BUSY_REFRESH_MS = 5_000;
@@ -47,7 +48,13 @@ export function useRecordings(at: number): { report: RecordingsReport | null; er
   useEffect(() => {
     void load();
     const timer = setInterval(() => void load(), busy ? BUSY_REFRESH_MS : IDLE_REFRESH_MS);
-    return () => clearInterval(timer);
+    /** Re-reads at once after a speaker is named, so every call they're in shows the name. */
+    const reload = () => void load();
+    window.addEventListener(SPEAKERS_CHANGED, reload);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener(SPEAKERS_CHANGED, reload);
+    };
   }, [load, busy]);
 
   return { report, error };
@@ -90,12 +97,12 @@ export function RecordingsCard({
 function RecordingItem({ recording }: { recording: CallRecording }) {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const turns = groupTurns(recording.lines);
+  const turns = groupTurns(recording.lines, recording.speakers);
 
   /** Puts the transcript on the clipboard as plain text. */
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(transcriptText(recording.lines));
+      await navigator.clipboard.writeText(transcriptText(recording.lines, recording.speakers));
       setMessage("Transcript copied");
     } catch (caught) {
       setMessage(`Couldn't copy it: ${readableError(caught)}`);
@@ -150,17 +157,7 @@ function RecordingItem({ recording }: { recording: CallRecording }) {
           <ActionItemList items={recording.actionItems} recording={recording} />
         </div>
       )}
-      {open && (
-        <ol className="transcript">
-          {turns.map((turn) => (
-            <li key={`${turn.side}@${turn.start}`} className={`turn turn-${turn.side}`}>
-              <span className="turn-time">{formatClock(turn.start)}</span>
-              <span className="turn-side">{SIDE_NAMES[turn.side]}</span>
-              <span className="turn-text">{turn.text}</span>
-            </li>
-          ))}
-        </ol>
-      )}
+      {open && <TranscriptTurns recording={recording} />}
     </li>
   );
 }

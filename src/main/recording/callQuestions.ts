@@ -1,4 +1,4 @@
-import type { CallQuestion, CallQuestionRequest, CallQuestionSource, TranscriptLine } from "../../shared/ipc";
+import type { CallQuestion, CallQuestionRequest, CallQuestionSource, CallSpeaker, TranscriptLine } from "../../shared/ipc";
 import { formatClock, transcriptText } from "../../shared/transcript";
 import { localDayBounds } from "../activity/dayReport";
 import type { HaikuClient } from "../calendar/BedrockHaiku";
@@ -50,6 +50,8 @@ export interface CallQuestionDeps {
   listMeetings(from: number, to: number): CalendarEvent[];
   /** Sonnet on Bedrock. */
   claude: Pick<HaikuClient, "invoke">;
+  /** A call's speakers, so the transcript names who said what. */
+  speakers(recordingId: number): CallSpeaker[];
   now(): number;
 }
 
@@ -58,6 +60,7 @@ interface PickedCall {
   recording: StoredRecording;
   title: string | null;
   lines: TranscriptLine[];
+  speakers: CallSpeaker[];
 }
 
 /** The calls picked for a question, and how they were picked when that's worth saying. */
@@ -145,7 +148,7 @@ export function buildRequest(question: string, calls: PickedCall[], now: number)
       const meeting = call.title === null ? "" : ` meeting="${call.title.replace(/"/g, "'")}"`;
       return (
         `<call date="${longDate(call.recording.start)}" time="${formatClock(call.recording.start)} to ${end}"${meeting}>\n` +
-        `${transcriptText(call.lines)}\n</call>`
+        `${transcriptText(call.lines, call.speakers)}\n</call>`
       );
     })
     .join("\n\n");
@@ -215,7 +218,7 @@ function fitToLimit(
       continue;
     }
     size += transcriptText(lines).length;
-    calls.push({ recording, title: titles.get(recording.id) ?? null, lines });
+    calls.push({ recording, title: titles.get(recording.id) ?? null, lines, speakers: deps.speakers(recording.id) });
   }
   const notes = [note];
   if (cut) {

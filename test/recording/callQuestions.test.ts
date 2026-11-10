@@ -45,7 +45,7 @@ describe("callQuestions", () => {
     questions = new CallQuestionStore(store.db);
     meetings = [];
     invoke = vi.fn<(body: object) => Promise<unknown>>(async () => ({ content: [{ type: "text", text: "  Dana wants test cards for Europe.  " }] }));
-    deps = { recordings, questions, listMeetings: () => meetings, claude: { invoke }, now: () => TUE + 8 * 60 * MIN };
+    deps = { recordings, questions, listMeetings: () => meetings, claude: { invoke }, speakers: () => [], now: () => TUE + 8 * 60 * MIN };
   });
 
   afterEach(() => {
@@ -190,7 +190,7 @@ describe("callQuestions", () => {
 
   it("should tell Sonnet today's date and mark a call still going", () => {
     const id = recordings.insertRecording(MON, "/tmp/none");
-    const body = buildRequest("What now?", [{ recording: recordings.getRecording(id)!, title: 'Say "hi"', lines: [] }], MON) as {
+    const body = buildRequest("What now?", [{ recording: recordings.getRecording(id)!, title: 'Say "hi"', lines: [], speakers: [] }], MON) as {
       messages: { content: string }[];
     };
     expect(body.messages[0].content).toContain("Today is Monday, November 9, 2026");

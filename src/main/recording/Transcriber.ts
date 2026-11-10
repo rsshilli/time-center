@@ -21,6 +21,8 @@ export interface TranscriberDeps {
   cancel(): void;
   /** Called when the transcript of a call grows, or the problem changes. */
   onChange(): void;
+  /** Called with a chunk's stored lines (and their ids) while its audio is still on disk, to tell voices apart. */
+  onLines(recordingId: number, chunk: AudioChunk, lines: { id: number; start: number; end: number; speakerId: null }[]): Promise<void>;
   log(message: string, error?: unknown): void;
 }
 
@@ -145,7 +147,13 @@ export class Transcriber {
       return;
     }
     try {
-      this.deps.store.insertLines(job.recordingId, toLines(job.chunk, segments));
+      const lines = toLines(job.chunk, segments);
+      const ids = this.deps.store.insertLines(job.recordingId, lines);
+      await this.deps.onLines(
+        job.recordingId,
+        job.chunk,
+        lines.map((line, index) => ({ id: ids[index], start: line.start, end: line.end, speakerId: null })),
+      );
       await this.deps.remove(job.chunk.wav);
     } catch (error) {
       this.deps.log(`Time Center: couldn't store the transcript of ${job.chunk.wav}`, error);
@@ -191,5 +199,6 @@ export function toLines(chunk: AudioChunk, segments: WhisperSegment[]): Transcri
       start: chunk.t0 + segment.from,
       end: chunk.t0 + segment.to,
       text: segment.text,
+      speakerId: null,
     }));
 }

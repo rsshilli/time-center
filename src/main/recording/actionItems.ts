@@ -1,5 +1,5 @@
-import { CALL_FINISHING_MS, type ActionItem, type ActionItemsReport } from "../../shared/ipc";
-import { SIDE_NAMES, formatClock, groupTurns, type Turn } from "../../shared/transcript";
+import { CALL_FINISHING_MS, type ActionItem, type ActionItemsReport, type CallSpeaker } from "../../shared/ipc";
+import { formatClock, groupTurns, speakerLabel, type Turn } from "../../shared/transcript";
 import type { HaikuClient } from "../calendar/BedrockHaiku";
 import type { ActionItemStore, StoredActionItems } from "./ActionItemStore";
 import type { RecordingStore } from "./RecordingStore";
@@ -39,6 +39,8 @@ export interface ActionItemDeps {
   store: Pick<ActionItemStore, "getItems" | "saveItems">;
   /** Haiku on Bedrock. */
   haiku: Pick<HaikuClient, "invoke">;
+  /** A call's speakers, so the transcript names who said what. */
+  speakers(recordingId: number): CallSpeaker[];
   now(): number;
 }
 
@@ -99,13 +101,14 @@ export class ActionItemFinder {
     }
     this.lastTry.set(recordingId, now);
     try {
-      const turns = latestTurns(groupTurns(lines), MAX_TRANSCRIPT_CHARS);
+      const speakers = this.deps.speakers(recordingId);
+      const turns = latestTurns(groupTurns(lines, speakers), MAX_TRANSCRIPT_CHARS);
       // Items said before the part that was sent can't be re-found, so they're kept as they were, and not
       // shown to Haiku, which would otherwise restate them inside the part it read.
       const cutOff = turns[0]?.start ?? 0;
       const earlier = (saved?.items ?? []).filter((item) => item.saidAt >= cutOff);
       const kept = (saved?.items ?? []).filter((item) => item.saidAt < cutOff);
-      const found = readItems(await this.deps.haiku.invoke(buildRequest(turns, earlier)), turns);
+      const found = readItems(await this.deps.haiku.invoke(buildRequest(turns, earlier, speakers)), turns);
       const items = [...found, ...kept.filter((item) => !found.some((match) => match.text === item.text))].slice(0, MAX_ITEMS);
       const next: StoredActionItems = { recordingId, items, coveredUntil: heardUntil, coveredLines: lines.length, checkedAt: now };
       this.deps.store.saveItems(next);
@@ -153,11 +156,12 @@ export function latestTurns(turns: Turn[], limit: number): Turn[] {
  * Builds the request: the numbered turns, the items found earlier, and a tool to answer through.
  * @param turns The turns to read, oldest first.
  * @param earlier The items found last time.
+ * @param speakers The call's speakers, to name who said each turn.
  * @returns The Messages API body.
  */
-export function buildRequest(turns: Turn[], earlier: ActionItem[]): object {
+export function buildRequest(turns: Turn[], earlier: ActionItem[], speakers: readonly CallSpeaker[] = []): object {
   const transcript = turns
-    .map((turn, index) => `[${index}] ${formatClock(turn.start)} ${SIDE_NAMES[turn.side]}: ${turn.text}`)
+    .map((turn, index) => `[${index}] ${formatClock(turn.start)} ${speakerLabel(turn, speakers)}: ${turn.text}`)
     .join("\n");
   const found =
     earlier.length === 0

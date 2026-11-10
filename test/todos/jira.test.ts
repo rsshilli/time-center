@@ -53,6 +53,7 @@ const INPUT = { site: `${SITE}/`, email: "me@example.com", projectKey: "qi", iss
 const TODO: Todo = {
   id: 1,
   markdown: "Send **Dana** the [keys](https://x.y)\n\n- by Friday",
+  section: "work",
   createdAt: 0,
   doneAt: null,
   source: { recordingId: 4, title: "Weekly sync", saidAt: new Date(2026, 10, 10, 10, 2).getTime() },
@@ -137,7 +138,7 @@ describe("jira", () => {
       "POST /rest/api/3/issue": { body: { key: "../../evil" } },
     });
 
-    await expect(createJiraTicket({ ...stores, fetch: fetchJira }, { id: 1, markdown: "Do it", createdAt: 0, doneAt: null, source: null, sent: [] })).rejects.toThrow(/didn't say which ticket/);
+    await expect(createJiraTicket({ ...stores, fetch: fetchJira }, { id: 1, markdown: "Do it", section: "work", createdAt: 0, doneAt: null, source: null, sent: [] })).rejects.toThrow(/didn't say which ticket/);
   });
 
   it("should make a ticket assigned to you, with the first line as summary and the item and call as description", async () => {

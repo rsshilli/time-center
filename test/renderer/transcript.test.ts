@@ -1,5 +1,5 @@
 import type { CallRecording, TranscriptLine } from "../../src/shared/ipc";
-import { dropEchoes, groupTurns, transcriptText } from "../../src/shared/transcript";
+import { dropEchoes, groupTurns, transcriptText, yourOwnLines } from "../../src/shared/transcript";
 import { stateText } from "../../src/renderer/RecordingsCard";
 
 const NINE = new Date(2026, 10, 6, 9, 30).getTime();
@@ -16,6 +16,7 @@ const line = (side: "me" | "them", seconds: number, text: string): TranscriptLin
   start: NINE + seconds * 1000,
   end: NINE + seconds * 1000 + 500,
   text,
+  speakerId: null,
 });
 
 describe("groupTurns", () => {
@@ -57,9 +58,53 @@ describe("dropEchoes", () => {
   });
 });
 
+describe("yourOwnLines", () => {
+  it("should keep only microphone lines long enough to tell and not repeated on their side", () => {
+    const lines = [
+      line("them", 0, "Thanks, I will send the release notes after lunch."),
+      line("me", 0, "Thanks. I will send the release notes after launch."),
+      line("me", 10, "Actually, can we move that to Monday?"),
+      line("me", 20, "Yeah, good."),
+      line("them", 30, "Actually, can we move that review to Monday?"),
+    ];
+    expect(yourOwnLines(lines).map((kept) => kept.start)).toEqual([NINE + 10_000]);
+  });
+});
+
 describe("transcriptText", () => {
   it("should write one turn per line with its time and speaker", () => {
     expect(transcriptText([line("me", 0, "Hi."), line("them", 61, "Hello.")])).toMatch(/^9:30\sAM You: Hi\.\n9:31\sAM Them: Hello\.$/);
+  });
+
+  it("should name each voice on the other side, and start a new turn when the voice changes", () => {
+    const speakers = [
+      { id: 1, number: 1, name: "Dana", sure: true },
+      { id: 2, number: 2, name: null, sure: false },
+      { id: 3, number: 3, name: "Eve", sure: false },
+    ];
+    const lines = [
+      { ...line("them", 0, "One."), speakerId: 1 },
+      { ...line("them", 1, "Two."), speakerId: 1 },
+      { ...line("them", 2, "Three."), speakerId: 2 },
+      { ...line("them", 3, "Four."), speakerId: 3 },
+    ];
+    expect(transcriptText(lines, speakers).replace(/9:30\sAM /g, "")).toBe("Dana: One. Two.\nSpeaker 2: Three.\nEve?: Four.");
+  });
+
+  it("should leave out your own voice repeated on their side, keeping one with no twin from your microphone", () => {
+    const speakers = [
+      { id: 1, number: 1, name: "You", sure: true },
+      { id: 2, number: 2, name: "Dana", sure: true },
+    ];
+    const lines = [
+      line("me", 0, "I have answers to most of your questions."),
+      { ...line("them", 0.1, "I have answers to most of your questions."), speakerId: 1 },
+      { ...line("them", 5, "Thanks."), speakerId: 2 },
+      { ...line("them", 30, "Said while my mic was off."), speakerId: 1 },
+    ];
+    expect(transcriptText(lines, speakers).replace(/9:3\d\sAM /g, "")).toBe(
+      "You: I have answers to most of your questions.\nDana: Thanks.\nYou: Said while my mic was off.",
+    );
   });
 });
 
@@ -75,6 +120,8 @@ describe("stateText", () => {
     waitingChunks: 0,
     unreadChunks: 0,
     lines: [],
+    speakers: [],
+    nameChoices: [],
     actionItems: [],
     actionItemsBehind: false,
     ...fields,

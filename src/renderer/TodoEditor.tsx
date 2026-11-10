@@ -1,4 +1,5 @@
 import { isAllowedUri } from "@tiptap/extension-link";
+import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { Markdown } from "@tiptap/markdown";
 import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
 import { Placeholder } from "@tiptap/extensions";
@@ -52,6 +53,9 @@ export function TodoEditor({ markdown, editable, placeholder, onSave, onSubmit, 
           HTMLAttributes: { target: "_blank", rel: "noopener noreferrer" },
         },
       }),
+      // Sub-steps you tick off one by one, saved as "- [ ] step" / "- [x] step"; Tab nests one under another.
+      TaskList,
+      TaskItem.configure({ nested: true }),
       Markdown,
       Placeholder.configure({ placeholder: placeholder ?? "" }),
     ],
@@ -125,7 +129,8 @@ export function TodoEditor({ markdown, editable, placeholder, onSave, onSubmit, 
       startLink();
       return true;
     }
-    const inBlock = editor.isActive("bulletList") || editor.isActive("orderedList") || editor.isActive("codeBlock");
+    const inBlock =
+      editor.isActive("bulletList") || editor.isActive("orderedList") || editor.isActive("taskList") || editor.isActive("codeBlock");
     if (handlers.current.onSubmit && event.key === "Enter" && !event.shiftKey && !event.isComposing && !inBlock) {
       event.preventDefault();
       handlers.current.onSubmit(editor.getMarkdown());
@@ -173,6 +178,7 @@ export function TodoEditor({ markdown, editable, placeholder, onSave, onSubmit, 
       italic: current?.isActive("italic") ?? false,
       code: current?.isActive("code") ?? false,
       bullets: current?.isActive("bulletList") ?? false,
+      steps: current?.isActive("taskList") ?? false,
     }),
   });
 
@@ -208,6 +214,14 @@ export function TodoEditor({ markdown, editable, placeholder, onSave, onSubmit, 
           </button>
           <button type="button" className={state?.bullets ? "on" : ""} title="Bullet list" onClick={() => editor.chain().focus().toggleBulletList().run()}>
             • List
+          </button>
+          <button
+            type="button"
+            className={state?.steps ? "on" : ""}
+            title="Sub-steps to tick off (Tab nests a step under the one above)"
+            onClick={() => editor.chain().focus().toggleTaskList().run()}
+          >
+            ☑ Steps
           </button>
           <button type="button" className={state?.inLink ? "on" : ""} title="Link the selected words (⌘K)" onClick={startLink}>
             Link

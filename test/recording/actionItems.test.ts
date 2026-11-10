@@ -34,7 +34,7 @@ describe("actionItems", () => {
     items = new ActionItemStore(store.db);
     now = START + 10 * MIN;
     invoke = vi.fn<(body: object) => Promise<unknown>>(async () => reply([{ turn: 1, text: "  You:  send Dana the keys " }]));
-    finder = new ActionItemFinder({ recordings, store: items, haiku: { invoke }, now: () => now });
+    finder = new ActionItemFinder({ recordings, store: items, haiku: { invoke }, speakers: () => [], now: () => now });
     id = recordings.insertRecording(START, "/tmp/none");
   });
 
@@ -204,8 +204,8 @@ describe("actionItems", () => {
 
 describe("readItems", () => {
   const turns: Turn[] = [
-    { side: "them", start: START, text: "a" },
-    { side: "me", start: START + MIN, text: "b" },
+    { side: "them", speakerId: null, start: START, text: "a" },
+    { side: "me", speakerId: null, start: START + MIN, text: "b" },
   ];
 
   it("should drop items with no text, a made-up turn or a repeat, and sort newest first", () => {
@@ -243,9 +243,9 @@ describe("readItems", () => {
 
 describe("latestTurns", () => {
   it("should keep the latest turns that fit", () => {
-    const turns: Turn[] = ["aaaa", "bb", "cc"].map((text, i) => ({ side: "me", start: i, text }));
+    const turns: Turn[] = ["aaaa", "bb", "cc"].map((text, i) => ({ side: "me", speakerId: null, start: i, text }));
     expect(latestTurns(turns, 5).map((turn) => turn.text)).toEqual(["bb", "cc"]);
-    expect(latestTurns(turns, 1)).toEqual([{ side: "me", start: 2, text: "c" }]);
+    expect(latestTurns(turns, 1)).toEqual([{ side: "me", speakerId: null, start: 2, text: "c" }]);
     expect(latestTurns([], 5)).toEqual([]);
   });
 });

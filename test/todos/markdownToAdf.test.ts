@@ -64,6 +64,12 @@ describe("markdownToAdf", () => {
     expect(json).toContain('"text":"deeper"');
   });
 
+  it("should show sub-steps as ☐ and ☑, nested ones inside their step", () => {
+    const json = JSON.stringify(markdownToAdf("Ship it\n\n- [x] build\n- [ ] package\n  - [ ] sign"));
+    expect(json).toContain('"text":"☑ "');
+    expect(json).toMatch(/"text":"☐ ".*"text":"package".*"bulletList".*"text":"☐ ".*"text":"sign"/);
+  });
+
   it("should leave a link with no address as plain words", () => {
     expect(markdownToAdf("[x]()").content).toEqual([{ type: "paragraph", content: [{ type: "text", text: "x" }] }]);
   });

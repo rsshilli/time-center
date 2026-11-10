@@ -16,6 +16,8 @@ const call = (fields: Partial<CallRecording>): CallRecording => ({
   waitingChunks: 0,
   unreadChunks: 0,
   lines: [],
+  speakers: [],
+  nameChoices: [],
   actionItems: [],
   actionItemsBehind: false,
   ...fields,

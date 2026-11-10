@@ -195,4 +195,54 @@ export const MIGRATIONS: readonly string[] = [
     sent                TEXT NOT NULL DEFAULT '[]'
   );
   `,
+  `
+  -- People you've named, with what their voice sounds like: embedding is the sum of the unit-length float32
+  -- voiceprints (TitaNet-small, 192 numbers) of every line you named them in; weight is how many lines that is.
+  CREATE TABLE voices (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    embedding  BLOB NOT NULL,
+    weight     REAL NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  -- The voices heard on the other side of one call, "Speaker 1", "Speaker 2"… in the order they first spoke.
+  -- embedding sums the call's lines in that voice (weight = how many). voice_id is who it is: set by you
+  -- (confirmed = 1) or matched to a named voice (voice_score = how close; shown as the name when sure, else
+  -- as "Dana?").
+  CREATE TABLE call_speakers (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    recording_id INTEGER NOT NULL REFERENCES recordings (id) ON DELETE CASCADE,
+    number       INTEGER NOT NULL,
+    embedding    BLOB NOT NULL,
+    weight       REAL NOT NULL,
+    voice_id     INTEGER REFERENCES voices (id) ON DELETE SET NULL,
+    voice_score  REAL,
+    confirmed    INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (recording_id, number)
+  );
+
+  ALTER TABLE transcript_lines ADD COLUMN speaker_id INTEGER REFERENCES call_speakers (id) ON DELETE SET NULL;
+
+  -- Where splitting a call's voices stands: null = not yet, 'live' = as it's transcribed, 'done', 'redo' (split
+  -- again from the audio file after a problem mid-call) or 'failed'.
+  ALTER TABLE recordings ADD COLUMN speakers_state TEXT;
+  `,
+  `
+  -- What a speaker added to a person's voice when you named them (the speaker keeps growing afterwards), so
+  -- renaming them takes back exactly that. Null when nothing was added (named nobody, or a name restored after
+  -- splitting a call again).
+  ALTER TABLE call_speakers ADD COLUMN named_embedding BLOB;
+  ALTER TABLE call_speakers ADD COLUMN named_weight REAL;
+  `,
+  `
+  -- Which part of the TODO list an item sits in: 'work' or 'personal'. Items made before sections existed are work.
+  ALTER TABLE todos ADD COLUMN section TEXT NOT NULL DEFAULT 'work';
+  `,
+  `
+  -- When your own voice was learned from a call's microphone lines (added to the "You" voice), so a call is only
+  -- counted once; null while it hasn't been.
+  ALTER TABLE recordings ADD COLUMN your_voice_learned_at TEXT;
+  `,
 ];

@@ -159,6 +159,27 @@ export interface TranscriptLine {
   start: number;
   end: number;
   text: string;
+  /** Which of the call's speakers said it ("them" lines only); null when unknown. */
+  speakerId: number | null;
+}
+
+/** One voice on the other side of a call. */
+export interface CallSpeaker {
+  id: number;
+  /** "Speaker 1", "Speaker 2"… in the order they first spoke. */
+  number: number;
+  /** Who it is, when you named them or their voice matched someone you named; null when unknown. */
+  name: string | null;
+  /** False when the name is only a guess for you to confirm (shown as "Dana?"). */
+  sure: boolean;
+}
+
+/** Someone you've named, as Settings lists them. */
+export interface NamedVoice {
+  id: number;
+  name: string;
+  /** How many calls you named them in or they were recognized in. */
+  calls: number;
 }
 
 /** A recorded call, as Today shows it. */
@@ -180,6 +201,10 @@ export interface CallRecording {
   /** Pieces whisper couldn't read, set aside (still in the audio files). */
   unreadChunks: number;
   lines: TranscriptLine[];
+  /** The voices heard on the other side, by number. */
+  speakers: CallSpeaker[];
+  /** Names to offer when you name a speaker: the meeting's invitees first, then everyone named before. */
+  nameChoices: string[];
   /** Action items Haiku found while you watched the call, newest first; empty if it never looked. */
   actionItems: ActionItem[];
   /** Whether Haiku has looked at this call and words came in since, so it still owes a final look. */
@@ -365,11 +390,21 @@ export interface TodoSent {
   at: number;
 }
 
+/** The parts of the TODO list, in the order they're shown. */
+export const TODO_SECTIONS = ["work", "personal"] as const;
+
+/** Which part of the TODO list an item sits in. */
+export type TodoSection = (typeof TODO_SECTIONS)[number];
+
+/** The items still to do in each section, in order. */
+export type TodoLayout = Record<TodoSection, number[]>;
+
 /** One item on the TODO list. */
 export interface Todo {
   id: number;
   /** The item as Markdown. */
   markdown: string;
+  section: TodoSection;
   createdAt: number;
   /** When it was ticked; null while it's still to do. */
   doneAt: number | null;
@@ -377,9 +412,10 @@ export interface Todo {
   sent: TodoSent[];
 }
 
-/** A new item: its text, and the call it came from if any. */
+/** A new item: its text, its section, and the call it came from if any. */
 export interface NewTodo {
   markdown: string;
+  section: TodoSection;
   source: TodoSource | null;
 }
 
@@ -451,13 +487,17 @@ export const IPC = {
   addTodo: "todos:add",
   updateTodo: "todos:update",
   setTodoDone: "todos:set-done",
-  reorderTodos: "todos:reorder",
+  arrangeTodos: "todos:arrange",
   deleteTodo: "todos:delete",
   clearDoneTodos: "todos:clear-done",
   getTodoActions: "todos:actions",
   runTodoAction: "todos:run-action",
   getJiraSettings: "jira:get-settings",
   saveJiraSettings: "jira:save-settings",
+  nameSpeaker: "speakers:name",
+  getVoices: "voices:get",
+  renameVoice: "voices:rename",
+  forgetVoice: "voices:forget",
 } as const;
 
 /** The API the preload script exposes to the renderer as `window.timeCenter`. */
@@ -535,8 +575,8 @@ export interface TimeCenterApi {
   updateTodo(id: number, markdown: string): Promise<Todo[]>;
   /** Ticks or unticks an item. */
   setTodoDone(id: number, done: boolean): Promise<Todo[]>;
-  /** Puts the items still to do in this order. */
-  reorderTodos(ids: number[]): Promise<Todo[]>;
+  /** Puts the items still to do in these sections, in this order. */
+  arrangeTodos(layout: TodoLayout): Promise<Todo[]>;
   deleteTodo(id: number): Promise<Todo[]>;
   /** Deletes every done item. */
   clearDoneTodos(): Promise<Todo[]>;
@@ -547,4 +587,11 @@ export interface TimeCenterApi {
   getJiraSettings(): Promise<JiraSettings>;
   /** Saves the Jira settings after checking them against Jira; throws with Jira's answer when they don't work. */
   saveJiraSettings(input: JiraSettingsInput): Promise<JiraSettings>;
+  /** Says who a call speaker is (their voice is then recognized in other calls), or null for "Speaker N". */
+  nameSpeaker(speakerId: number, name: string | null): Promise<void>;
+  /** Everyone you've named, by name. */
+  getVoices(): Promise<NamedVoice[]>;
+  renameVoice(voiceId: number, name: string): Promise<NamedVoice[]>;
+  /** Forgets someone and their voiceprint; their calls go back to "Speaker N". */
+  forgetVoice(voiceId: number): Promise<NamedVoice[]>;
 }

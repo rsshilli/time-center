@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { CALL_FINISHING_MS, type ActionItemsReport, type CallRecording } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
-import { SIDE_NAMES, formatClock, groupTurns } from "../shared/transcript";
+import { formatClock, groupTurns } from "../shared/transcript";
 import { escapeMarkdown } from "./todoOrder";
+import { TranscriptTurns } from "./TranscriptTurns";
 
 /** How often the card asks for fresh action items; the main process calls Haiku at most once a minute. */
 const ACTION_POLL_MS = 15_000;
@@ -19,7 +20,7 @@ const FOLLOW_SLACK_PX = 40;
  * @param props.recording The live call (or one whose last words are still being transcribed).
  */
 export function LiveCallCard({ recording }: { recording: CallRecording }) {
-  const turns = groupTurns(recording.lines);
+  const turns = groupTurns(recording.lines, recording.speakers);
   const [items, setItems] = useState<ActionItemsReport>({ items: recording.actionItems, checkedAt: null, problem: null });
   const [failure, setFailure] = useState<string | null>(null);
   const transcript = useRef<HTMLOListElement>(null);
@@ -87,15 +88,7 @@ export function LiveCallCard({ recording }: { recording: CallRecording }) {
           {turns.length === 0 ? (
             <p className="muted">Words show up here a few seconds after they're said.</p>
           ) : (
-            <ol className="transcript" ref={transcript} onScroll={onScroll}>
-              {turns.map((turn, index) => (
-                <li key={`${index}:${turn.side}@${turn.start}`} className={`turn turn-${turn.side}`}>
-                  <span className="turn-time">{formatClock(turn.start)}</span>
-                  <span className="turn-side">{SIDE_NAMES[turn.side]}</span>
-                  <span className="turn-text">{turn.text}</span>
-                </li>
-              ))}
-            </ol>
+            <TranscriptTurns recording={recording} listRef={transcript} onScroll={onScroll} />
           )}
         </div>
         <div className="live-actions">
@@ -139,6 +132,7 @@ export function ActionItemList({ items, recording }: { items: CallRecording["act
     try {
       await window.timeCenter.addTodo({
         markdown: escapeMarkdown(item.text),
+        section: "work",
         source: { recordingId: recording.id, title: recording.meetingTitle ?? "Call", saidAt: item.saidAt },
       });
       setProblem(null);

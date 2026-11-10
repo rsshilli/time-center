@@ -42,12 +42,18 @@ import {
 import { bestMeeting } from "./recording/callMeeting";
 import { registerRecordingIpc } from "./recording/recordingIpc";
 import { RecordingStore, type StoredRecording } from "./recording/RecordingStore";
-import { Transcriber } from "./recording/Transcriber";
+import { Transcriber, type TranscriberDeps } from "./recording/Transcriber";
 import { cancelWhisper, prepareWhisper, runWhisper, transcribeSpeech } from "./recording/whisper";
 import { CallQuestionStore } from "./recording/CallQuestionStore";
 import { askAboutCalls } from "./recording/callQuestions";
 import { ActionItemStore } from "./recording/ActionItemStore";
 import { ActionItemFinder } from "./recording/actionItems";
+import { decodeCallAudio } from "./speakers/decodeCallAudio";
+import { callSpeakers, registerSpeakerIpc } from "./speakers/speakerIpc";
+import { SpeakerService, type SpeakerServiceDeps } from "./speakers/SpeakerService";
+import { SpeakerStore } from "./speakers/SpeakerStore";
+import { loadVoicePrinter } from "./speakers/voiceModel";
+import { readWav } from "./speakers/wavSamples";
 import { cleanUpScreenshots } from "./screenshots/cleanUpScreenshots";
 import { captureDisplays, sampleCpuPercent } from "./screenshots/platform";
 import { ScreenCapturer } from "./screenshots/ScreenCapturer";
@@ -72,6 +78,12 @@ const QUIT_WAIT_MS = 30_000;
 
 /** How often old screenshots are cleared out. */
 const CLEAN_UP_EVERY_MS = 24 * 60 * 60_000;
+
+/** How long after start the voices of earlier calls are first split. */
+const SPEAKERS_FIRST_CATCH_UP_MS = 60_000;
+
+/** How often calls whose voices aren't final are looked for (e.g. once their last chunk is transcribed). */
+const SPEAKERS_CATCH_UP_EVERY_MS = 5 * 60_000;
 
 void main();
 
@@ -98,8 +110,22 @@ async function main(): Promise<void> {
   const callQuestions = new CallQuestionStore(store.db);
   const sonnet = new BedrockHaiku(undefined, BEDROCK_SONNET_MODEL);
   const actionItems = new ActionItemStore(store.db);
-  const actionItemFinder = new ActionItemFinder({ recordings, store: actionItems, haiku: new BedrockHaiku(), now: () => Date.now() });
-  const transcriber = createTranscriber(recordings);
+  const speakerStore = new SpeakerStore(store.db);
+  const actionItemFinder = new ActionItemFinder({
+    recordings,
+    store: actionItems,
+    haiku: new BedrockHaiku(),
+    speakers: (id) => callSpeakers(speakerStore, id),
+    now: () => Date.now(),
+  });
+  // The speaker service and the transcriber each need the other: lines go to the service as they're
+  // stored, and the service waits for a call's last chunk before making its speakers final.
+  const speakers: SpeakerService = createSpeakers(speakerStore, recordings, {
+    stillTranscribing: (id) => transcriber.waiting(id) > 0,
+    isRecording: () => recorder.isRecording(),
+  });
+  const transcriber = createTranscriber(recordings, (id, chunk, lines) => speakers.chunkTranscribed(id, chunk, lines));
+  void speakers.prepareAhead();
   // Finds whisper and the model (downloading it the first time) now, so a problem shows before the first call.
   void transcriber.prepareAhead();
   const recordingsDir = join(app.getPath("userData"), "recordings");
@@ -117,6 +143,7 @@ async function main(): Promise<void> {
       .listTypedEvents(recording.start, recording.end ?? Date.now())
       .filter((meeting) => meeting.response !== "declined");
     await nameRecordingAudio(recordings, recording, bestMeeting(recording, meetings, Date.now())?.title ?? null, recordingsDir);
+    void speakers.catchUp();
   };
   const recorder = new RecordingController({
     store: recordings,
@@ -202,9 +229,11 @@ async function main(): Promise<void> {
     typer: calendar.typer,
     now: () => Date.now(),
   });
+  registerSpeakerIpc({ service: speakers, store: speakerStore });
   registerRecordingIpc({
     store: recordings,
     transcriber,
+    speakers: speakerStore,
     listMeetings: (from, to) => calendar.store.listTypedEvents(from, to),
     showInFinder: (path) => {
       if (path.endsWith(".m4a")) {
@@ -221,6 +250,7 @@ async function main(): Promise<void> {
           questions: callQuestions,
           listMeetings: (from, to) => calendar.store.listTypedEvents(from, to),
           claude: sonnet,
+          speakers: (id) => callSpeakers(speakerStore, id),
           now: () => Date.now(),
         },
         request,
@@ -256,6 +286,10 @@ async function main(): Promise<void> {
   });
   // Stops a recording once its call is over, even if the helper's samples stop coming.
   setInterval(() => recorder.tick(), 5_000);
+  // Splits the voices of calls recorded before speakers existed (and finishes ones split live), a while after
+  // start so it doesn't compete with starting up, then again every few minutes.
+  setTimeout(() => void speakers.catchUp(), SPEAKERS_FIRST_CATCH_UP_MS);
+  setInterval(() => void speakers.catchUp(), SPEAKERS_CATCH_UP_EVERY_MS);
   scheduler.start();
   tracker.start();
   capturer.start();
@@ -346,11 +380,13 @@ function createTracker(
  * Builds the transcriber on whisper.cpp (Homebrew's whisper-cli) and the large-v3-turbo model kept in the
  * app's folder, downloaded the first time it's needed.
  * @param recordings The recordings table, where the lines go.
+ * @param onLines Given each chunk's stored lines while its audio is still on disk, to tell voices apart.
  * @returns The transcriber.
  */
-function createTranscriber(recordings: RecordingStore): Transcriber {
+function createTranscriber(recordings: RecordingStore, onLines: TranscriberDeps["onLines"]): Transcriber {
   return new Transcriber({
     store: recordings,
+    onLines,
     prepare: () => prepareWhisper(join(app.getPath("userData"), "models")),
     run: runWhisper,
     remove: (wav) => rm(wav, { force: true }),
@@ -358,6 +394,36 @@ function createTranscriber(recordings: RecordingStore): Transcriber {
     cancel: cancelWhisper,
     // The Calls card re-reads on its own (every 5 s while a call is busy, else 30 s), so there's nothing to push.
     onChange: () => {},
+    log: (message, error) => console.error(message, error),
+  });
+}
+
+/**
+ * Builds the speaker service on TitaNet-small (downloaded into the app's models folder the first time), reading
+ * chunks directly and a whole call's mixed audio through macOS's afconvert.
+ * @param store The speakers tables.
+ * @param recordings The recordings table, for when each call started.
+ * @param calls Whether a call is still being transcribed or recorded.
+ * @returns The service.
+ */
+function createSpeakers(
+  store: SpeakerStore,
+  recordings: RecordingStore,
+  calls: Pick<SpeakerServiceDeps, "stillTranscribing" | "isRecording">,
+): SpeakerService {
+  const speakersTemp = join(app.getPath("temp"), "time-center-speakers");
+  // A decoded call left behind by a crash mid-split.
+  void rm(speakersTemp, { recursive: true, force: true });
+  return new SpeakerService({
+    store,
+    loadPrinter: () => loadVoicePrinter(join(app.getPath("userData"), "models")),
+    readChunk: async (wav) => readWav(await readFile(wav)).samples,
+    readCall: (audioPath) => decodeCallAudio(audioPath, speakersTemp),
+    recordingStart: (id) => recordings.getRecording(id)?.start ?? null,
+    stillTranscribing: calls.stillTranscribing,
+    isRecording: calls.isRecording,
+    yieldNow: () => new Promise((resolve) => setImmediate(resolve)),
+    now: () => Date.now(),
     log: (message, error) => console.error(message, error),
   });
 }

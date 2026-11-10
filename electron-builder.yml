@@ -15,6 +15,9 @@ extraResources:
   - from: resources/bin
     to: bin
 asar: true
+# sherpa-onnx (voiceprints) is a native module with its own dylibs, which macOS can only load from real files.
+asarUnpack:
+  - node_modules/sherpa-onnx-darwin-arm64/**
 mac:
   category: public.app-category.productivity
   target:

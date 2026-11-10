@@ -117,18 +117,18 @@ export class RecordingStore {
    * Adds lines whisper heard.
    * @param recordingId The call.
    * @param lines The lines.
+   * @returns Their ids, in the same order.
    */
-  insertLines(recordingId: number, lines: TranscriptLine[]): void {
+  insertLines(recordingId: number, lines: Omit<TranscriptLine, "speakerId">[]): number[] {
     const insert = this.db.prepare(
       "INSERT INTO transcript_lines (recording_id, side, started_at, ended_at, text) VALUES (?, ?, ?, ?, ?)",
     );
     // All of a chunk's lines or none, so a chunk read again after a failure doesn't repeat half of them.
     this.db.exec("BEGIN");
     try {
-      for (const line of lines) {
-        insert.run(recordingId, line.side, iso(line.start), iso(line.end), line.text);
-      }
+      const ids = lines.map((line) => Number(insert.run(recordingId, line.side, iso(line.start), iso(line.end), line.text).lastInsertRowid));
       this.db.exec("COMMIT");
+      return ids;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -149,6 +149,7 @@ export class RecordingStore {
       start: Date.parse(String(row.started_at)),
       end: Date.parse(String(row.ended_at)),
       text: String(row.text),
+      speakerId: row.speaker_id === null || row.speaker_id === undefined ? null : Number(row.speaker_id),
     }));
   }
 

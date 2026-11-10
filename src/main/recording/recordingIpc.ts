@@ -12,6 +12,8 @@ import {
 import { localDayBounds } from "../activity/dayReport";
 import type { CalendarEvent } from "../calendar/meetingLinks";
 import { assertMoment, assertRowId } from "../ipcHandlers";
+import { describeSpeakers, nameChoices } from "../speakers/speakerIpc";
+import type { SpeakerStore } from "../speakers/SpeakerStore";
 import type { ActionItemStore } from "./ActionItemStore";
 import { bestMeeting } from "./callMeeting";
 import type { RecordingStore } from "./RecordingStore";
@@ -35,6 +37,8 @@ export interface RecordingIpcDependencies {
   dictate(wav: Uint8Array): Promise<string>;
   /** Each call's saved action items. */
   actionItems: Pick<ActionItemStore, "getItems">;
+  /** Each call's speakers, and the people you've named. */
+  speakers: Pick<SpeakerStore, "listSpeakers" | "listVoices">;
   /** Brings a call's action items up to date with Haiku, when it's time to. */
   refreshActionItems(recordingId: number): Promise<ActionItemsReport>;
   now(): number;
@@ -119,25 +123,30 @@ export function assertDictation(value: unknown): Uint8Array {
  * @returns The report.
  */
 export function buildRecordingsReport(
-  deps: Pick<RecordingIpcDependencies, "store" | "transcriber" | "listMeetings" | "countUnread" | "actionItems" | "now">,
+  deps: Pick<RecordingIpcDependencies, "store" | "transcriber" | "listMeetings" | "countUnread" | "actionItems" | "speakers" | "now">,
   at: number,
 ): RecordingsReport {
   const { dayStart, dayEnd } = localDayBounds(at);
   const meetings = deps.listMeetings(dayStart, dayEnd).filter((meeting) => meeting.response !== "declined");
+  const voices = deps.speakers.listVoices();
+  const names = new Map(voices.map((voice) => [voice.id, voice.name]));
   const recordings = deps.store.listRecordings(dayStart, dayEnd).map((recording): CallRecording => {
     const lines = deps.store.listLines(recording.id);
     const saved = deps.actionItems.getItems(recording.id);
+    const meeting = bestMeeting(recording, meetings, deps.now());
     return {
       id: recording.id,
       start: recording.start,
       end: recording.end,
-      meetingTitle: bestMeeting(recording, meetings, deps.now())?.title ?? null,
+      meetingTitle: meeting?.title ?? null,
       mic: recording.mic,
       error: recording.error,
       audioKept: !recording.audioDeleted,
       waitingChunks: deps.transcriber.waiting(recording.id),
       unreadChunks: recording.audioDeleted ? 0 : deps.countUnread(recording.folder),
       lines,
+      speakers: describeSpeakers(deps.speakers.listSpeakers(recording.id), names),
+      nameChoices: nameChoices(meeting?.attendees ?? [], voices.map((voice) => voice.name)),
       actionItems: saved?.items ?? [],
       actionItemsBehind: saved !== null && lines.length > saved.coveredLines,
     };

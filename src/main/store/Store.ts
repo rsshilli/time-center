@@ -26,7 +26,8 @@ export class Store {
    */
   constructor(readonly dbPath: string) {
     this.db = new DatabaseSync(dbPath);
-    this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+    // secure_delete: a forgotten voiceprint is overwritten, not left in free pages that go into the backup.
+    this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;");
     this.migrate();
     this.failInterruptedBackupRuns();
   }
