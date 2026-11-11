@@ -2,6 +2,7 @@ import {
   type JiraDraft,
   type JiraSettings,
   type JiraSettingsInput,
+  type JiraSprint,
   type JiraUser,
   MAX_JIRA_DESCRIPTION_CHARS,
   MAX_JIRA_SUMMARY_CHARS,
@@ -9,6 +10,7 @@ import {
   type TodoSent,
 } from "../../shared/ipc";
 import { withRequiredSections } from "../../shared/jiraSections";
+import { sprintTeam } from "../../shared/jiraSprints";
 import type { SecretStore } from "../store/SecretStore";
 import type { Store } from "../store/Store";
 import { type AdfNode, markdownToAdf } from "./markdownToAdf";
@@ -53,6 +55,12 @@ export interface JiraConfig {
 
 /** The Jira field that says which engineering team a ticket belongs to, found by this name. */
 export const TEAM_FIELD_NAME = "Engineering Team";
+
+/** The kind of field Jira Software's Sprint is, found by this rather than its name or id. */
+const SPRINT_FIELD_TYPE = "com.pyxis.greenhopper.jira:gh-sprint";
+
+/** The most pages of boards or sprints read; at 50 a page, far more than a project has. */
+const MAX_AGILE_PAGES = 10;
 
 /**
  * The menu entry Jira adds to a TODO: "Make a Jira ticket…", which opens the popup where the ticket is drafted,
@@ -201,19 +209,52 @@ export async function createJiraTicket(deps: JiraDependencies, todo: Todo, value
     description: describe(todo, withRequiredSections(draft.description, draft.issueType)),
     ...(draft.assignee ? { assignee: { accountId: draft.assignee.accountId } } : {}),
   };
+  const meta = draft.team === null && draft.sprint === null ? null : (await ticketFields(deps, [draft.issueType])).get(draft.issueType);
   if (draft.team !== null) {
-    const team = (await teamFields(deps, [draft.issueType])).get(draft.issueType);
+    const team = meta?.team;
     if (!team || !team.choices.includes(draft.team)) {
       throw new Error(`${config.projectKey} ${draft.issueType}s have no "${draft.team}" Engineering Team.`);
     }
     // QI's Engineering Team is a single-choice field (schema "option"), which takes one { value }.
     fields[team.id] = { value: draft.team };
   }
+  if (draft.sprint !== null) {
+    if (!meta?.sprint) {
+      throw new Error(`${config.projectKey} ${draft.issueType}s can't be put in a sprint. Pick Backlog.`);
+    }
+    await assertOpenSprint(deps, draft.sprint);
+    // Jira's Sprint field takes the sprint's id as a bare number.
+    fields[meta.sprint] = draft.sprint;
+  }
   const created = (await jiraRequest(deps.fetch, config, "POST", "/rest/api/3/issue", { fields })) as { key?: string };
   if (!created.key || !/^[A-Z][A-Z0-9_]*-\d+$/.test(created.key)) {
     throw new Error("Jira may have made the ticket but didn't say which. Check Jira before trying again.");
   }
   return { action: "jira", label: created.key, url: `${config.site}/browse/${created.key}` };
+}
+
+/**
+ * Checks with Jira that a sprint is still open and plans this project's tickets, so a ticket can't be put in a
+ * closed sprint or another project's.
+ * @param deps The saved settings and fetch.
+ * @param id The sprint's id.
+ */
+async function assertOpenSprint(deps: JiraDependencies, id: number): Promise<void> {
+  const config = savedConfig(deps);
+  const refused = new Error("That sprint has closed or isn't one of this project's. Pick another.");
+  const sprint = (await jiraRequest(deps.fetch, config, "GET", `/rest/agile/1.0/sprint/${id}`).catch(() => {
+    throw refused;
+  })) as { state?: string; originBoardId?: number };
+  if (sprint.state !== "active" && sprint.state !== "future") {
+    throw refused;
+  }
+  const board = (await jiraRequest(deps.fetch, config, "GET", `/rest/agile/1.0/board/${sprint.originBoardId}/project?maxResults=50`).catch(
+    () => null,
+  )) as { values?: { key?: string }[] } | null;
+  // A board Jira won't describe (e.g. one in another space) is let through; Jira itself refuses a wrong sprint.
+  if (board && !(board.values ?? []).some((project) => project.key === config.projectKey)) {
+    throw refused;
+  }
 }
 
 /**
@@ -249,12 +290,17 @@ export function assertJiraDraft(value: unknown, issueTypes: readonly string[]): 
   if (team !== null && (typeof team !== "string" || team.length > 100)) {
     throw new Error("Pick an Engineering Team from the list.");
   }
+  const sprint = draft.sprint ?? null;
+  if (sprint !== null && !(Number.isSafeInteger(sprint) && sprint > 0)) {
+    throw new Error("Pick a sprint from the list.");
+  }
   return {
     issueType: draft.issueType,
     summary,
     description: draft.description.trim(),
     assignee: assignee && { accountId: assignee.accountId, displayName: assignee.displayName },
     team,
+    sprint,
   };
 }
 
@@ -277,12 +323,16 @@ export function describe(todo: Todo, markdown: string): AdfNode {
 }
 
 /**
- * The project's Engineering Team field for each of some types of ticket: its id and its choices.
+ * The project's Engineering Team and Sprint fields for each of some types of ticket: the team field's id and
+ * choices, and the sprint field's id.
  * @param deps The saved settings and fetch.
  * @param issueTypes The types of ticket.
- * @returns Each type's field, or null for a type that has none (or that the project doesn't have).
+ * @returns Each type's fields, null for one it lacks; a type the project doesn't have gets neither.
  */
-export async function teamFields(deps: JiraDependencies, issueTypes: readonly string[]): Promise<Map<string, { id: string; choices: string[] } | null>> {
+export async function ticketFields(
+  deps: JiraDependencies,
+  issueTypes: readonly string[],
+): Promise<Map<string, { team: { id: string; choices: string[] } | null; sprint: string | null }>> {
   const config = savedConfig(deps);
   const project = encodeURIComponent(config.projectKey);
   const types = (await jiraRequest(deps.fetch, config, "GET", `/rest/api/3/issue/createmeta/${project}/issuetypes`)) as {
@@ -292,22 +342,92 @@ export async function teamFields(deps: JiraDependencies, issueTypes: readonly st
     issueTypes.map(async (issueType) => {
       const type = (types.issueTypes ?? []).find((candidate) => candidate.name === issueType);
       if (!type) {
-        return [issueType, null] as const;
+        return [issueType, { team: null, sprint: null }] as const;
       }
       const meta = (await jiraRequest(deps.fetch, config, "GET", `/rest/api/3/issue/createmeta/${project}/issuetypes/${encodeURIComponent(type.id)}?maxResults=200`)) as {
-        fields?: { fieldId: string; name: string; allowedValues?: { value?: string; disabled?: boolean }[] }[];
+        fields?: { fieldId: string; name: string; schema?: { custom?: string }; allowedValues?: { value?: string; disabled?: boolean }[] }[];
       };
       const field = (meta.fields ?? []).find((candidate) => candidate.name === TEAM_FIELD_NAME);
+      const sprint = (meta.fields ?? []).find((candidate) => candidate.schema?.custom === SPRINT_FIELD_TYPE)?.fieldId ?? null;
       if (!field) {
-        return [issueType, null] as const;
+        return [issueType, { team: null, sprint }] as const;
       }
       const choices = (field.allowedValues ?? [])
         .filter((choice) => !choice.disabled && typeof choice.value === "string")
         .map((choice) => choice.value as string);
-      return [issueType, { id: field.fieldId, choices }] as const;
+      return [issueType, { team: { id: field.fieldId, choices }, sprint }] as const;
     }),
   );
-  return new Map(found);
+  return new Map<string, { team: { id: string; choices: string[] } | null; sprint: string | null }>(found);
+}
+
+/**
+ * The project's sprints that are going now or still to come, from every scrum board that shows its tickets.
+ * Each team plans on its own board, so the boards are read in parallel and a sprint shown on several is kept once.
+ * @param deps The saved settings and fetch.
+ * @param teams The Engineering Teams, to say whose each sprint is.
+ * @returns The sprints, earliest start first; ones without dates last.
+ */
+export async function listSprints(deps: JiraDependencies, teams: readonly string[]): Promise<JiraSprint[]> {
+  const config = savedConfig(deps);
+  const boards = await pagesOf<{ id: number }>(
+    deps,
+    `/rest/agile/1.0/board?projectKeyOrId=${encodeURIComponent(config.projectKey)}&type=scrum`,
+  );
+  const perBoard = await Promise.all(
+    boards.map((board) =>
+      pagesOf<{ id: number; name?: string; state?: string; startDate?: string; endDate?: string }>(
+        deps,
+        `/rest/agile/1.0/board/${encodeURIComponent(String(board.id))}/sprint?state=active,future`,
+      ),
+    ),
+  );
+  const byId = new Map<number, JiraSprint>();
+  for (const sprint of perBoard.flat()) {
+    if (!Number.isSafeInteger(sprint.id) || byId.has(sprint.id) || (sprint.state !== "active" && sprint.state !== "future")) {
+      continue;
+    }
+    const name = typeof sprint.name === "string" ? sprint.name : `Sprint ${sprint.id}`;
+    byId.set(sprint.id, {
+      id: sprint.id,
+      name,
+      state: sprint.state,
+      start: readDate(sprint.startDate),
+      end: readDate(sprint.endDate),
+      team: sprintTeam(name, teams),
+    });
+  }
+  return [...byId.values()].sort((a, b) => (a.start ?? Infinity) - (b.start ?? Infinity) || a.id - b.id);
+}
+
+/**
+ * Reads every page of one of Jira's agile lists ({ values, isLast }).
+ * @param deps The saved settings and fetch.
+ * @param path The list's address, with its query.
+ * @returns All the entries.
+ */
+async function pagesOf<T>(deps: JiraDependencies, path: string): Promise<T[]> {
+  const config = savedConfig(deps);
+  const all: T[] = [];
+  for (let page = 0; page < MAX_AGILE_PAGES; page += 1) {
+    const reply = (await jiraRequest(deps.fetch, config, "GET", `${path}&maxResults=50&startAt=${all.length}`)) as { values?: T[]; isLast?: boolean };
+    const values = reply.values ?? [];
+    all.push(...values);
+    if (reply.isLast !== false || values.length === 0) {
+      break;
+    }
+  }
+  return all;
+}
+
+/**
+ * A date from Jira as a time.
+ * @param value The date, e.g. "2026-11-24T15:00:00.000Z".
+ * @returns The time, or null when missing or unreadable.
+ */
+function readDate(value: unknown): number | null {
+  const time = typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isNaN(time) ? null : time;
 }
 
 /**

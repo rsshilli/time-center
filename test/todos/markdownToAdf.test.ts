@@ -70,6 +70,14 @@ describe("markdownToAdf", () => {
     expect(json).toMatch(/"text":"☐ ".*"text":"package".*"bulletList".*"text":"☐ ".*"text":"sign"/);
   });
 
+  it("should put a checklist item's box and words on one line, without the [ ] written out as well", () => {
+    const list = markdownToAdf("- [ ] It shows the product area.").content?.[0];
+    expect(list?.content?.[0]).toEqual({
+      type: "listItem",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "☐ " }, { type: "text", text: "It shows the product area." }] }],
+    });
+  });
+
   it("should leave a link with no address as plain words", () => {
     expect(markdownToAdf("[x]()").content).toEqual([{ type: "paragraph", content: [{ type: "text", text: "x" }] }]);
   });

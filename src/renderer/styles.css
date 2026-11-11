@@ -1672,9 +1672,14 @@ button.link.todo-source {
   margin-top: 16px;
 }
 
+.jira-dialog {
+  width: min(860px, 100%);
+}
+
+/* Type, team, sprint (whose names and dates run longest) and assignee. */
 .jira-fields {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.7fr) minmax(0, 1.2fr);
   gap: 12px;
 }
 

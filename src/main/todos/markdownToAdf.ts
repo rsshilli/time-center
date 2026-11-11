@@ -112,7 +112,8 @@ function inlineOf(token: Token): AdfNode[] {
  */
 function list(token: Tokens.List): AdfNode {
   const items = token.items.map((item): AdfNode => {
-    const content = fitInside(blocks(item.tokens));
+    // A "- [ ]" item carries its box as a checkbox token too; the ☐ below stands for it, so it isn't written twice.
+    const content = fitInside(blocks(item.tokens.filter((part) => part.type !== "checkbox")));
     const prefix = item.task ? (item.checked ? "☑ " : "☐ ") : "";
     if (content[0]?.type !== "paragraph") {
       content.unshift(paragraph([]));

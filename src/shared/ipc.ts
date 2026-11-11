@@ -478,6 +478,20 @@ export interface JiraDraft {
   assignee: JiraUser | null;
   /** One of the project's Engineering Team choices, or null for none. */
   team: string | null;
+  /** The id of one of the project's open sprints, or null for the backlog. */
+  sprint: number | null;
+}
+
+/** A sprint a ticket can go into: one that's going now or hasn't started. */
+export interface JiraSprint {
+  id: number;
+  name: string;
+  state: "active" | "future";
+  /** When it starts and ends, or null for a sprint without dates. */
+  start: number | null;
+  end: number | null;
+  /** The Engineering Team whose sprint it is, read from its name ("PØD-2026-22"), or null when none matches. */
+  team: string | null;
 }
 
 /** A proposed ticket, with the choices the popup offers. */
@@ -486,6 +500,10 @@ export interface JiraDraftResult {
   issueTypes: string[];
   /** Each type's Engineering Team choices; empty for a type without that field. */
   teamsByType: Record<string, string[]>;
+  /** The project's open sprints, earliest first. */
+  sprints: JiraSprint[];
+  /** The types of ticket that can go into a sprint (their create screen has a Sprint field). */
+  sprintTypes: string[];
   /** Something to tell you about the proposal, e.g. that the person named couldn't be found in Jira. */
   note: string | null;
 }

@@ -292,7 +292,7 @@ async function main(): Promise<void> {
     getJiraSettings: () => readJiraSettings(jira),
     saveJiraSettings: (input) => saveJiraSettings(jira, input),
     draftJiraTicket: (todo, current, instruction) =>
-      draftJiraTicket({ jira, claude: sonnet, callTranscript: handoff.callTranscript }, todo, current, instruction),
+      draftJiraTicket({ jira, claude: sonnet, callTranscript: handoff.callTranscript, now: () => Date.now() }, todo, current, instruction),
     searchJiraUsers: (query) => searchAssignees(jira, query),
     createJiraTicket: (todo, draft) => createJiraTicket(jira, todo, draft),
     prepareQbdcodeHandoff: (todo) => prepareQbdcodeHandoff(handoff, todo),

@@ -6,6 +6,7 @@ import {
   createJiraTicket,
   jiraActions,
   jiraUnavailable,
+  listSprints,
   readJiraSettings,
   saveJiraSettings,
 } from "../../src/main/todos/jira";
@@ -76,6 +77,31 @@ const DRAFT: JiraDraft = {
   description: "Send **Dana** the [keys](https://x.y)\n\n- by Friday",
   assignee: { accountId: "dana-1", displayName: "Dana Scully" },
   team: "Platform",
+  sprint: null,
+};
+
+/** QI's two scrum boards and their open sprints, the same sprint showing on both. */
+const SPRINTS = {
+  "GET /rest/agile/1.0/board": { body: { values: [{ id: 375 }, { id: 373 }], isLast: true } },
+  "GET /rest/agile/1.0/board/375/sprint": {
+    body: {
+      values: [
+        { id: 1652, name: "Platform - November", state: "active", startDate: "2026-11-02T15:00:00.000Z", endDate: "2026-12-01T15:00:00.000Z" },
+        { id: 1653, name: "Platform - December", state: "future", startDate: "2026-12-01T15:00:00.000Z", endDate: "2026-12-31T15:00:00.000Z" },
+      ],
+      isLast: true,
+    },
+  },
+  "GET /rest/agile/1.0/board/373/sprint": {
+    body: {
+      values: [
+        { id: 1690, name: "PØD-2026-23", state: "future", startDate: "2026-11-24T15:00:00.000Z", endDate: "2026-12-08T15:00:00.000Z" },
+        { id: 1653, name: "Platform - December", state: "future", startDate: "2026-12-01T15:00:00.000Z", endDate: "2026-12-31T15:00:00.000Z" },
+        { id: 1280, name: "Performance", state: "future" },
+      ],
+      isLast: true,
+    },
+  },
 };
 
 /** QI's ticket types and the Task's Engineering Team field, as Jira describes them. */
@@ -86,6 +112,7 @@ const TEAM_META = {
       fields: [
         { fieldId: "summary", name: "Summary" },
         { fieldId: "customfield_10206", name: "Engineering Team", allowedValues: [{ value: "Platform" }, { value: "Bug" }, { value: "Old", disabled: true }] },
+        { fieldId: "customfield_10010", name: "Sprint", schema: { custom: "com.pyxis.greenhopper.jira:gh-sprint" } },
       ],
     },
   },
@@ -245,6 +272,51 @@ describe("jira", () => {
     const body = JSON.parse(String(calls.at(-1)?.init.body)) as { fields: Record<string, unknown> };
     expect(body.fields).not.toHaveProperty("assignee");
     expect(body.fields).not.toHaveProperty("customfield_10206");
+    expect(body.fields).not.toHaveProperty("customfield_10010");
+  });
+
+  it("should put the ticket in the sprint picked, and refuse one that isn't open in the project", async () => {
+    const stores = fakeStores();
+    stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
+    stores.rawSecrets.set(JIRA_KEYS.token, "t");
+    const { fetchJira, calls } = fakeFetch({
+      ...TEAM_META,
+      // Platform plans on a board shared with its own project, QP, as it does in Jira.
+      "GET /rest/agile/1.0/sprint/1653": { body: { id: 1653, state: "future", originBoardId: 271 } },
+      "GET /rest/agile/1.0/board/271/project": { body: { values: [{ key: "QP" }, { key: "QI" }] } },
+      "GET /rest/agile/1.0/sprint/1500": { body: { id: 1500, state: "closed", originBoardId: 271 } },
+      "GET /rest/agile/1.0/sprint/1600": { body: { id: 1600, state: "future", originBoardId: 9 } },
+      "GET /rest/agile/1.0/board/9/project": { body: { values: [{ key: "OPS" }] } },
+      "POST /rest/api/3/issue": { status: 201, body: { key: "QI-11" } },
+    });
+
+    for (const refused of [999, 1500, 1600]) {
+      await expect(createJiraTicket({ ...stores, fetch: fetchJira }, TODO, { ...DRAFT, sprint: refused })).rejects.toThrow(/closed or isn't one of this project's/);
+    }
+    expect(calls.some((call) => call.init.method === "POST")).toBe(false);
+    await createJiraTicket({ ...stores, fetch: fetchJira }, TODO, { ...DRAFT, sprint: 1653 });
+    const body = JSON.parse(String(calls.at(-1)?.init.body)) as { fields: Record<string, unknown> };
+    expect(body.fields.customfield_10010).toBe(1653);
+  });
+});
+
+describe("listSprints", () => {
+  it("should gather the open sprints from every scrum board once, earliest first, each with its team", async () => {
+    const stores = fakeStores();
+    stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
+    stores.rawSecrets.set(JIRA_KEYS.token, "t");
+    const { fetchJira, calls } = fakeFetch(SPRINTS);
+
+    const sprints = await listSprints({ ...stores, fetch: fetchJira }, ["Platform", "PØD", "Bug"]);
+
+    expect(sprints.map((sprint) => [sprint.id, sprint.team, sprint.state])).toEqual([
+      [1652, "Platform", "active"],
+      [1690, "PØD", "future"],
+      [1653, "Platform", "future"],
+      [1280, null, "future"],
+    ]);
+    expect(sprints[1].start).toBe(Date.parse("2026-11-24T15:00:00.000Z"));
+    expect(new URL(calls[0].url).search).toBe("?projectKeyOrId=QI&type=scrum&maxResults=50&startAt=0");
   });
 
   it("should put back a bug's sections deleted by hand before making it", async () => {

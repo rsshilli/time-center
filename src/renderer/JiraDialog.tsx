@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type JiraDraft, type JiraDraftResult, type JiraUser, MAX_JIRA_SUMMARY_CHARS, type Todo } from "../shared/ipc";
+import { type JiraDraft, type JiraDraftResult, type JiraSprint, type JiraUser, MAX_JIRA_SUMMARY_CHARS, type Todo } from "../shared/ipc";
 import { withRequiredSections } from "../shared/jiraSections";
+import { isUnderWay, nextSprint } from "../shared/jiraSprints";
 import { QuestionInput } from "./AskCard";
 import { readableError } from "./CalendarSettings";
 
@@ -117,11 +118,24 @@ export function JiraDialog({ todo, onClose, onCreated }: { todo: Todo; onClose()
       return;
     }
     const allowed = result.teamsByType[issueType] ?? [];
+    const team = draft.team !== null && allowed.includes(draft.team) ? draft.team : null;
+    const keepSprint = team === draft.team && result.sprintTypes.includes(draft.issueType);
     edit({
       issueType,
       description: withRequiredSections(draft.description, issueType),
-      team: draft.team !== null && allowed.includes(draft.team) ? draft.team : null,
+      team,
+      sprint: !result.sprintTypes.includes(issueType) ? null : keepSprint ? draft.sprint : nextSprint(result.sprints, team, Date.now()),
     });
+  };
+
+  /**
+   * Switches the team, and the sprint to the new team's next one.
+   * @param team The team, or null for none.
+   */
+  const changeTeam = (team: string | null) => {
+    if (result && draft) {
+      edit({ team, sprint: result.sprintTypes.includes(draft.issueType) ? nextSprint(result.sprints, team, Date.now()) : null });
+    }
   };
 
   const locked = busy !== null;
@@ -149,13 +163,20 @@ export function JiraDialog({ todo, onClose, onCreated }: { todo: Todo; onClose()
               </label>
               <label>
                 Engineering Team
-                <select value={draft.team ?? ""} disabled={locked || teams.length === 0} onChange={(event) => edit({ team: event.target.value || null })}>
+                <select value={draft.team ?? ""} disabled={locked || teams.length === 0} onChange={(event) => changeTeam(event.target.value || null)}>
                   <option value="">None</option>
                   {teams.map((team) => (
                     <option key={team}>{team}</option>
                   ))}
                 </select>
               </label>
+              <SprintPicker
+                sprints={result.sprints}
+                team={draft.team}
+                sprint={draft.sprint}
+                disabled={locked || !result.sprintTypes.includes(draft.issueType)}
+                onPick={(sprint) => edit({ sprint })}
+              />
               <AssigneePicker assignee={draft.assignee} disabled={locked} onPick={(assignee) => edit({ assignee })} />
               <label className="wide">
                 Summary
@@ -201,6 +222,69 @@ export function JiraDialog({ todo, onClose, onCreated }: { todo: Todo; onClose()
       </div>
     </div>
   );
+}
+
+/**
+ * The sprint field: the team's sprints first, then everyone else's, and the backlog.
+ * @param props.sprints The project's open sprints, earliest first.
+ * @param props.team The ticket's team, whose sprints are listed first.
+ * @param props.sprint The sprint picked, or null for the backlog.
+ * @param props.disabled Whether it can be changed.
+ * @param props.onPick Called with the sprint's id, or null for the backlog.
+ */
+function SprintPicker({
+  sprints,
+  team,
+  sprint,
+  disabled,
+  onPick,
+}: {
+  sprints: JiraSprint[];
+  team: string | null;
+  sprint: number | null;
+  disabled: boolean;
+  onPick(sprint: number | null): void;
+}) {
+  const ours = sprints.filter((candidate) => team !== null && candidate.team === team);
+  const others = sprints.filter((candidate) => !ours.includes(candidate));
+  return (
+    <label>
+      Sprint
+      <select value={sprint ?? ""} disabled={disabled} onChange={(event) => onPick(event.target.value ? Number(event.target.value) : null)}>
+        <option value="">Backlog (no sprint)</option>
+        {ours.length > 0 && (
+          <optgroup label={`${team}'s sprints`}>
+            {ours.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {sprintLabel(candidate)}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {others.length > 0 && (
+          <optgroup label={ours.length > 0 ? "Other sprints" : "Sprints"}>
+            {others.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {sprintLabel(candidate)}
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+    </label>
+  );
+}
+
+/**
+ * How a sprint reads in the list: its name, then its dates, or "now" for the one under way.
+ * @param sprint The sprint.
+ * @returns e.g. "PØD-2026-23 · Nov 24 – Dec 8", with "(now)" when its dates say it's under way.
+ */
+function sprintLabel(sprint: JiraSprint): string {
+  /** A date as "Nov 24". */
+  const day = (time: number) => new Date(time).toLocaleDateString([], { month: "short", day: "numeric" });
+  const dates = sprint.start !== null && sprint.end !== null ? ` · ${day(sprint.start)} – ${day(sprint.end)}` : "";
+  return `${sprint.name}${dates}${isUnderWay(sprint, Date.now()) ? " (now)" : ""}`;
 }
 
 /**

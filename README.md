@@ -146,8 +146,11 @@ from (QI with Task, Story (FRS), Epic (URS) and Bug to start). **Check and save*
 before saving. The token is encrypted with a key in your Mac's Keychain and never shown again.
 
 A TODO's ⋯ → **Make a Jira ticket…** opens a popup where Sonnet proposes the type, summary, description,
-assignee (whoever took it on in the call, else you) and Engineering Team, from the item and what was said
-around it in the call. Edit any field, search Jira for another assignee, or type a change for Sonnet to make
+assignee (whoever took it on in the call, else you) and Engineering Team (PØD or Platform, unless the item or
+call clearly says another team), from the item and what was said around it in the call. Acceptance criteria
+come as plain bullets. The **Sprint** starts on the team's
+next sprint: the first of its sprints whose start date is still ahead, so never the one under way. Pick
+another sprint, or Backlog, from the list; changing the team moves it to that team's next sprint. Edit any field, search Jira for another assignee, or type a change for Sonnet to make
 ("make it a bug for Platform"). A story always gets an **Acceptance Criteria** section; a bug gets **Steps to
 reproduce** and **Expected / Actual**. Nothing goes to Jira until **Create ticket**; the ticket's number then
 shows under the item as a link.
