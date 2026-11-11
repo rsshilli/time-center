@@ -205,7 +205,7 @@ describe("jira", () => {
       "POST /rest/api/3/issue": { body: { key: "../../evil" } },
     });
 
-    await expect(createJiraTicket({ ...stores, fetch: fetchJira }, TODO, { ...DRAFT, team: null })).rejects.toThrow(/didn't say which ticket/);
+    await expect(createJiraTicket({ ...stores, fetch: fetchJira }, TODO, { ...DRAFT, team: null })).rejects.toThrow(/didn't say which\. Check Jira before trying again/);
   });
 
   it("should make the ticket as drafted, with its assignee, Engineering Team and the call in the description", async () => {
@@ -245,6 +245,20 @@ describe("jira", () => {
     const body = JSON.parse(String(calls.at(-1)?.init.body)) as { fields: Record<string, unknown> };
     expect(body.fields).not.toHaveProperty("assignee");
     expect(body.fields).not.toHaveProperty("customfield_10206");
+  });
+
+  it("should put back a bug's sections deleted by hand before making it", async () => {
+    const stores = fakeStores();
+    stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
+    stores.rawSecrets.set(JIRA_KEYS.token, "t");
+    stores.rawSettings.set(JIRA_KEYS.issueTypes, JSON.stringify(["Task", "Bug"]));
+    const { fetchJira, calls } = fakeFetch({ "POST /rest/api/3/issue": { status: 201, body: { key: "QI-10" } } });
+
+    await createJiraTicket({ ...stores, fetch: fetchJira }, TODO, { ...DRAFT, issueType: "Bug", description: "It breaks.", team: null });
+
+    const description = JSON.stringify((JSON.parse(String(calls.at(-1)?.init.body)) as { fields: { description: unknown } }).fields.description);
+    expect(description).toContain("Steps to reproduce");
+    expect(description).toContain("Expected / Actual");
   });
 
   it("should pass on Jira's own words when it refuses a ticket", async () => {

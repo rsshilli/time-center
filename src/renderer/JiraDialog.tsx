@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { type JiraDraft, type JiraDraftResult, type JiraUser, MAX_JIRA_SUMMARY_CHARS, type Todo } from "../shared/ipc";
 import { withRequiredSections } from "../shared/jiraSections";
 import { QuestionInput } from "./AskCard";
@@ -24,28 +24,42 @@ export function JiraDialog({ todo, onClose, onCreated }: { todo: Todo; onClose()
   const [busy, setBusy] = useState<Busy>("drafting");
   const [problem, setProblem] = useState<string | null>(null);
   const [instruction, setInstruction] = useState("");
+  const open = useRef(true);
 
-  useEffect(() => {
-    let current = true;
-    window.timeCenter
-      .draftJiraTicket(todo.id, null, null)
-      .then((drafted) => {
-        if (current) {
-          setResult(drafted);
-          setDraft(drafted.draft);
-        }
-      })
-      .catch((failure: unknown) => current && setProblem(readableError(failure)))
-      .finally(() => current && setBusy(null));
-    return () => {
-      current = false;
-    };
+  /** Has Sonnet write the first draft; run again by "Try again" when it fails. */
+  const firstDraft = useCallback(async () => {
+    setBusy("drafting");
+    setProblem(null);
+    try {
+      const drafted = await window.timeCenter.draftJiraTicket(todo.id, null, null);
+      if (open.current) {
+        setResult(drafted);
+        setDraft(drafted.draft);
+      }
+    } catch (failure) {
+      if (open.current) {
+        setProblem(readableError(failure));
+      }
+    } finally {
+      if (open.current) {
+        setBusy(null);
+      }
+    }
   }, [todo.id]);
 
   useEffect(() => {
-    /** Esc closes the popup, unless the ticket is being made. */
+    open.current = true;
+    void firstDraft();
+    return () => {
+      open.current = false;
+    };
+  }, [firstDraft]);
+
+  useEffect(() => {
+    /** Esc closes the popup, unless the ticket is being made or you're typing in a field (so edits aren't lost). */
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape" && busy !== "creating") {
+      const inField = event.target instanceof HTMLElement && ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName);
+      if (event.key === "Escape" && busy !== "creating" && !inField) {
         onClose();
       }
     };
@@ -94,7 +108,24 @@ export function JiraDialog({ todo, onClose, onCreated }: { todo: Todo; onClose()
    */
   const edit = (fields: Partial<JiraDraft>) => setDraft((before) => (before ? { ...before, ...fields } : before));
 
+  /**
+   * Switches the type: swaps in its required sections, and drops a team the new type doesn't offer.
+   * @param issueType The new type.
+   */
+  const changeType = (issueType: string) => {
+    if (!draft || !result) {
+      return;
+    }
+    const allowed = result.teamsByType[issueType] ?? [];
+    edit({
+      issueType,
+      description: withRequiredSections(draft.description, issueType),
+      team: draft.team !== null && allowed.includes(draft.team) ? draft.team : null,
+    });
+  };
+
   const locked = busy !== null;
+  const teams = draft && result ? (result.teamsByType[draft.issueType] ?? []) : [];
   return (
     <div className="dialog-backdrop">
       <div className="dialog jira-dialog" role="dialog" aria-modal="true" aria-labelledby="jira-dialog-title">
@@ -109,7 +140,7 @@ export function JiraDialog({ todo, onClose, onCreated }: { todo: Todo; onClose()
                 <select
                   value={draft.issueType}
                   disabled={locked}
-                  onChange={(event) => edit({ issueType: event.target.value, description: withRequiredSections(draft.description, event.target.value) })}
+                  onChange={(event) => changeType(event.target.value)}
                 >
                   {result.issueTypes.map((type) => (
                     <option key={type}>{type}</option>
@@ -118,9 +149,9 @@ export function JiraDialog({ todo, onClose, onCreated }: { todo: Todo; onClose()
               </label>
               <label>
                 Engineering Team
-                <select value={draft.team ?? ""} disabled={locked || result.teams.length === 0} onChange={(event) => edit({ team: event.target.value || null })}>
+                <select value={draft.team ?? ""} disabled={locked || teams.length === 0} onChange={(event) => edit({ team: event.target.value || null })}>
                   <option value="">None</option>
-                  {result.teams.map((team) => (
+                  {teams.map((team) => (
                     <option key={team}>{team}</option>
                   ))}
                 </select>
@@ -154,6 +185,11 @@ export function JiraDialog({ todo, onClose, onCreated }: { todo: Todo; onClose()
           </>
         )}
         {problem && <p className="error">{problem}</p>}
+        {problem && !draft && busy === null && (
+          <button type="button" className="secondary" onClick={() => void firstDraft()}>
+            Try again
+          </button>
+        )}
         <div className="dialog-actions">
           <button type="button" className="secondary" disabled={busy === "creating"} onClick={onClose}>
             Cancel
@@ -177,10 +213,22 @@ function AssigneePicker({ assignee, disabled, onPick }: { assignee: JiraUser | n
   const [query, setQuery] = useState<string | null>(null);
   const [found, setFound] = useState<JiraUser[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
+  // Leaving the box closes the list a moment later (so a click on a name lands first); coming back cancels that.
+  const closing = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (closing.current) {
+        clearTimeout(closing.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (query === null || query.trim() === "") {
       setFound([]);
+      setProblem(null);
       return undefined;
     }
     let current = true;
@@ -193,7 +241,11 @@ function AssigneePicker({ assignee, disabled, onPick }: { assignee: JiraUser | n
             setProblem(null);
           }
         })
-        .catch((failure: unknown) => current && setProblem(readableError(failure)));
+        .catch((failure: unknown) => {
+          if (current) {
+            setProblem(readableError(failure));
+          }
+        });
     }, SEARCH_DELAY_MS);
     return () => {
       current = false;
@@ -218,8 +270,15 @@ function AssigneePicker({ assignee, disabled, onPick }: { assignee: JiraUser | n
           value={query ?? assignee?.displayName ?? ""}
           placeholder={query === null ? "Unassigned" : "Type a name"}
           disabled={disabled}
-          onFocus={() => setQuery("")}
-          onBlur={() => setTimeout(() => setQuery(null), 150)}
+          onFocus={() => {
+            if (closing.current) {
+              clearTimeout(closing.current);
+            }
+            setQuery("");
+          }}
+          onBlur={() => {
+            closing.current = setTimeout(() => setQuery(null), 150);
+          }}
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>

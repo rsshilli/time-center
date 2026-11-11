@@ -8,6 +8,7 @@ import {
   type Todo,
   type TodoSent,
 } from "../../shared/ipc";
+import { withRequiredSections } from "../../shared/jiraSections";
 import type { SecretStore } from "../store/SecretStore";
 import type { Store } from "../store/Store";
 import { type AdfNode, markdownToAdf } from "./markdownToAdf";
@@ -183,7 +184,8 @@ export async function saveJiraSettings(deps: JiraDependencies, value: unknown): 
 }
 
 /**
- * Makes the Jira ticket set out in the popup. The description gets a line naming the call the item came from.
+ * Makes the Jira ticket set out in the popup. A story or bug gets any section it needs that was deleted by hand,
+ * and the description gets a line naming the call the item came from.
  * @param deps The saved settings and fetch.
  * @param todo The item.
  * @param value The ticket as the window sent it.
@@ -196,19 +198,20 @@ export async function createJiraTicket(deps: JiraDependencies, todo: Todo, value
     project: { key: config.projectKey },
     issuetype: { name: draft.issueType },
     summary: draft.summary,
-    description: describe(todo, draft.description),
+    description: describe(todo, withRequiredSections(draft.description, draft.issueType)),
     ...(draft.assignee ? { assignee: { accountId: draft.assignee.accountId } } : {}),
   };
   if (draft.team !== null) {
-    const team = await teamField(deps, draft.issueType);
+    const team = (await teamFields(deps, [draft.issueType])).get(draft.issueType);
     if (!team || !team.choices.includes(draft.team)) {
       throw new Error(`${config.projectKey} ${draft.issueType}s have no "${draft.team}" Engineering Team.`);
     }
+    // QI's Engineering Team is a single-choice field (schema "option"), which takes one { value }.
     fields[team.id] = { value: draft.team };
   }
   const created = (await jiraRequest(deps.fetch, config, "POST", "/rest/api/3/issue", { fields })) as { key?: string };
   if (!created.key || !/^[A-Z][A-Z0-9_]*-\d+$/.test(created.key)) {
-    throw new Error("Jira didn't say which ticket it made.");
+    throw new Error("Jira may have made the ticket but didn't say which. Check Jira before trying again.");
   }
   return { action: "jira", label: created.key, url: `${config.site}/browse/${created.key}` };
 }
@@ -256,32 +259,55 @@ export function assertJiraDraft(value: unknown, issueTypes: readonly string[]): 
 }
 
 /**
- * The project's Engineering Team field for a type of ticket: its id and its choices.
- * @param deps The saved settings and fetch.
- * @param issueType The type of ticket.
- * @returns The field, or null when that type of ticket has none.
+ * The ticket's description: the text written for it, then a line naming the call the item came from.
+ * @param todo The item.
+ * @param markdown The description as written, in Markdown.
+ * @returns The document.
  */
-export async function teamField(deps: JiraDependencies, issueType: string): Promise<{ id: string; choices: string[] } | null> {
+export function describe(todo: Todo, markdown: string): AdfNode {
+  const doc = markdownToAdf(markdown);
+  if (todo.source) {
+    const when = new Date(todo.source.saidAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+    doc.content = [
+      ...(doc.content ?? []),
+      { type: "paragraph", content: [{ type: "text", text: `From the call "${todo.source.title}", ${when}.`, marks: [{ type: "em" }] }] },
+    ];
+  }
+  return doc;
+}
+
+/**
+ * The project's Engineering Team field for each of some types of ticket: its id and its choices.
+ * @param deps The saved settings and fetch.
+ * @param issueTypes The types of ticket.
+ * @returns Each type's field, or null for a type that has none (or that the project doesn't have).
+ */
+export async function teamFields(deps: JiraDependencies, issueTypes: readonly string[]): Promise<Map<string, { id: string; choices: string[] } | null>> {
   const config = savedConfig(deps);
   const project = encodeURIComponent(config.projectKey);
   const types = (await jiraRequest(deps.fetch, config, "GET", `/rest/api/3/issue/createmeta/${project}/issuetypes`)) as {
     issueTypes?: { id: string; name: string }[];
   };
-  const type = (types.issueTypes ?? []).find((candidate) => candidate.name === issueType);
-  if (!type) {
-    return null;
-  }
-  const meta = (await jiraRequest(deps.fetch, config, "GET", `/rest/api/3/issue/createmeta/${project}/issuetypes/${encodeURIComponent(type.id)}?maxResults=200`)) as {
-    fields?: { fieldId: string; name: string; allowedValues?: { value?: string; disabled?: boolean }[] }[];
-  };
-  const field = (meta.fields ?? []).find((candidate) => candidate.name === TEAM_FIELD_NAME);
-  if (!field) {
-    return null;
-  }
-  const choices = (field.allowedValues ?? [])
-    .filter((choice) => !choice.disabled && typeof choice.value === "string")
-    .map((choice) => choice.value as string);
-  return { id: field.fieldId, choices };
+  const found = await Promise.all(
+    issueTypes.map(async (issueType) => {
+      const type = (types.issueTypes ?? []).find((candidate) => candidate.name === issueType);
+      if (!type) {
+        return [issueType, null] as const;
+      }
+      const meta = (await jiraRequest(deps.fetch, config, "GET", `/rest/api/3/issue/createmeta/${project}/issuetypes/${encodeURIComponent(type.id)}?maxResults=200`)) as {
+        fields?: { fieldId: string; name: string; allowedValues?: { value?: string; disabled?: boolean }[] }[];
+      };
+      const field = (meta.fields ?? []).find((candidate) => candidate.name === TEAM_FIELD_NAME);
+      if (!field) {
+        return [issueType, null] as const;
+      }
+      const choices = (field.allowedValues ?? [])
+        .filter((choice) => !choice.disabled && typeof choice.value === "string")
+        .map((choice) => choice.value as string);
+      return [issueType, { id: field.fieldId, choices }] as const;
+    }),
+  );
+  return new Map(found);
 }
 
 /**
@@ -321,24 +347,6 @@ function readUser(value: unknown): JiraUser[] {
     return [];
   }
   return [{ accountId: user.accountId, displayName: user.displayName }];
-}
-
-/**
- * The ticket's description: the text written for it, then a line naming the call the item came from.
- * @param todo The item.
- * @param markdown The description as written, in Markdown.
- * @returns The document.
- */
-export function describe(todo: Todo, markdown: string): AdfNode {
-  const doc = markdownToAdf(markdown);
-  if (todo.source) {
-    const when = new Date(todo.source.saidAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
-    doc.content = [
-      ...(doc.content ?? []),
-      { type: "paragraph", content: [{ type: "text", text: `From the call "${todo.source.title}", ${when}.`, marks: [{ type: "em" }] }] },
-    ];
-  }
-  return doc;
 }
 
 /**

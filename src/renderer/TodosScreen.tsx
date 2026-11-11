@@ -1,8 +1,9 @@
 import type { Editor } from "@tiptap/react";
 import { type DragEvent, useEffect, useRef, useState } from "react";
-import { TODO_SECTIONS, type Todo, type TodoActionInfo, type TodoLayout, type TodoSection } from "../shared/ipc";
+import { TODO_SECTIONS, type Todo, type TodoActionInfo, type TodoDialog, type TodoLayout, type TodoSection } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
 import { JiraDialog } from "./JiraDialog";
+import { QbdcodeDialog } from "./QbdcodeDialog";
 import { TodoEditor } from "./TodoEditor";
 import { hasWords, moveTodo, stepProgress } from "./todoOrder";
 
@@ -277,7 +278,7 @@ function TodoRow({ todo, actions, update, onOpenCall, drag, showSection }: RowPr
   const [menuOpen, setMenuOpen] = useState(false);
   const [running, setRunning] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [jiraOpen, setJiraOpen] = useState(false);
+  const [dialog, setDialog] = useState<TodoDialog | null>(null);
   // Only the ⋮⋮ handle starts a drag, so selecting words in the item still works.
   const [handleHeld, setHandleHeld] = useState(false);
   const done = todo.doneAt !== null;
@@ -299,8 +300,8 @@ function TodoRow({ todo, actions, update, onOpenCall, drag, showSection }: RowPr
    */
   const run = async (action: TodoActionInfo) => {
     setMenuOpen(false);
-    if (action.dialog === "jira") {
-      setJiraOpen(true);
+    if (action.dialog) {
+      setDialog(action.dialog);
       return;
     }
     setRunning(action.label);
@@ -415,7 +416,8 @@ function TodoRow({ todo, actions, update, onOpenCall, drag, showSection }: RowPr
           </div>
         )}
       </div>
-      {jiraOpen && <JiraDialog todo={todo} onClose={() => setJiraOpen(false)} onCreated={(list) => void update(async () => list)} />}
+      {dialog === "jira" && <JiraDialog todo={todo} onClose={() => setDialog(null)} onCreated={(list) => void update(async () => list)} />}
+      {dialog === "qbdcode" && <QbdcodeDialog todo={todo} onClose={() => setDialog(null)} onSent={(list) => void update(async () => list)} />}
     </li>
   );
 }

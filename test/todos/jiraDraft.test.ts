@@ -82,7 +82,7 @@ describe("draftJiraTicket", () => {
         description: "Dana sends the keys.\n\n## Steps to reproduce\n1. To be written.\n\n## Expected / Actual\nExpected: To be written.\n\nActual: To be written.",
         assignee: { accountId: "dana-1", displayName: "Dana Scully" }, team: "Platform" },
       issueTypes: ["Task", "Bug"],
-      teams: ["Platform", "Bug"],
+      teamsByType: { Task: ["Platform", "Support"], Bug: ["Platform", "Bug"] },
       note: null,
     });
     const prompt = requests[0].messages[0].content;
@@ -126,6 +126,47 @@ describe("draftJiraTicket", () => {
     expect(requests[0].messages[0].content).toContain("Change the draft like this: say it's due Friday");
     expect(requests[0].messages[0].content).toContain('"assignee":"Dana Scully"');
     expect(paths.some((path) => path.startsWith("/rest/api/3/user/assignable/search"))).toBe(false);
+  });
+
+  it("should keep the assignee and team picked by hand when Sonnet's change leaves them out", async () => {
+    const current: JiraDraft = { issueType: "Task", summary: "s", description: "d", assignee: { accountId: "fox-1", displayName: "Fox Mulder" }, team: "Support" };
+    const { deps } = fakeDeps('{"issueType": "Task", "summary": "Shorter", "description": "d", "assignee": null}');
+
+    const { draft, note } = await draftJiraTicket(deps, TODO, current, "shorten the summary");
+
+    expect(draft).toMatchObject({ summary: "Shorter", assignee: { accountId: "fox-1" }, team: "Support" });
+    expect(note).toBeNull();
+    const unassigned = await draftJiraTicket(deps, TODO, { ...current, assignee: null }, "shorten the summary");
+    expect(unassigned.draft.assignee).toBeNull();
+  });
+
+  it("should keep the person picked, and say so, when Sonnet names someone Jira can't find on a change", async () => {
+    const current: JiraDraft = { issueType: "Task", summary: "s", description: "d", assignee: { accountId: "fox-1", displayName: "Fox Mulder" }, team: null };
+    const { deps } = fakeDeps('{"issueType": "Task", "summary": "s", "description": "d", "assignee": "Walter Skinner", "team": null}', []);
+
+    const result = await draftJiraTicket(deps, TODO, current, "give it to Walter");
+
+    expect(result.draft.assignee?.accountId).toBe("fox-1");
+    expect(result.note).toBe('Couldn\'t find "Walter Skinner" in Jira, so it\'s assigned to Fox Mulder.');
+  });
+
+  it("should take a single loose match from Jira's search, with a note to check it", async () => {
+    const { deps } = fakeDeps('{"issueType": "Task", "summary": "s", "description": "d", "assignee": "Dana", "team": null}');
+
+    const result = await draftJiraTicket(deps, TODO, null, null);
+
+    expect(result.draft.assignee?.accountId).toBe("dana-1");
+    expect(result.note).toBe('Assigned to Dana Scully, the closest match for "Dana". Check it\'s the right person.');
+  });
+
+  it("should keep a bug's sections when its description is too long, cutting the text instead", async () => {
+    const long = "x".repeat(40_000);
+    const { deps } = fakeDeps(JSON.stringify({ issueType: "Bug", summary: "s", description: long, assignee: null, team: null }));
+
+    const { draft } = await draftJiraTicket(deps, TODO, null, null);
+
+    expect(draft.description.length).toBeLessThanOrEqual(30_000);
+    expect(draft.description).toContain("## Expected / Actual");
   });
 
   it("should leave it unassigned when asked, and refuse a change with no words", async () => {

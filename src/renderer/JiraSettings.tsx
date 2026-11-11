@@ -13,9 +13,9 @@ interface JiraForm {
 }
 
 /**
- * Where a TODO's "Make a Jira …" puts the ticket: your Jira site, the email and API token you sign in with,
- * the project and the types of ticket the menu offers. Saving checks them against Jira first; the token is
- * kept with the Mac's Keychain key and never shown again.
+ * Where a TODO's "Make a Jira ticket…" puts the ticket: your Jira site, the email and API token you sign in
+ * with, the project and the types of ticket the popup offers. Saving checks them against Jira first; the token
+ * is kept with the Mac's Keychain key and never shown again.
  */
 export function JiraSettings() {
   const [saved, setSaved] = useState<Saved | null>(null);
@@ -50,7 +50,7 @@ export function JiraSettings() {
       });
       setSaved(next);
       setForm({ ...form, site: next.site, projectKey: next.projectKey, issueTypes: next.issueTypes.join(", "), token: "" });
-      setMessage(`Saved. A TODO's menu can make a ${typeList(next.issueTypes)} ticket in ${next.projectKey}, assigned to you.`);
+      setMessage(`Saved. A TODO's menu can make a ${typeList(next.issueTypes)} ticket in ${next.projectKey}.`);
     } catch (error) {
       setMessage(readableError(error));
     } finally {
@@ -69,8 +69,9 @@ export function JiraSettings() {
     <section className="jira-settings">
       <h1>Jira</h1>
       <p className="lead">
-        A TODO's ⋯ menu can make a Jira ticket of each type below from it, assigned to you: its first line becomes
-        the summary, the whole item (with its formatting and links) the description.
+        A TODO's ⋯ → Make a Jira ticket… opens a popup where Sonnet drafts the ticket from the item and its call:
+        one of the types below, a summary, description, assignee and Engineering Team, for you to change before
+        it's made.
       </p>
       <form className="settings" onSubmit={(event) => void save(event)}>
         <label>

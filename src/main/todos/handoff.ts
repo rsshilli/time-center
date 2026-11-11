@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import type { CallSpeaker, Todo, TodoSent, TranscriptLine } from "../../shared/ipc";
+import type { CallSpeaker, QbdcodeHandoff, Todo, TodoSent, TranscriptLine } from "../../shared/ipc";
 import { formatClock, groupTurns, speakerLabel, type Turn } from "../../shared/transcript";
 import type { TodoAction } from "./todoIpc";
 
@@ -15,6 +15,9 @@ export const QBDCODE_CLI = ".local/bin/qbdcode";
 
 /** Claude Desktop cuts a Cowork link's text at 14,336 characters; this leaves room to spare. */
 export const MAX_COWORK_CHARS = 14_000;
+
+/** The longest instructions the QbDCode popup sends, in characters. */
+export const MAX_QBDCODE_CHARS = 50_000;
 
 /** How much of the call before and after the item was said goes with it. */
 export const TRANSCRIPT_BEFORE_MS = 5 * 60_000;
@@ -44,8 +47,8 @@ export interface HandoffDependencies {
 }
 
 /**
- * The menu actions that hand an item to Claude: a new Cowork task in Claude Desktop, and a new QbDCode chat in
- * each of your qbdvision worktrees.
+ * The menu actions that hand an item to Claude: a new Cowork task in Claude Desktop, and "Send to QbDCode…",
+ * which opens the popup where the instructions are edited and the worktree picked.
  * @param deps What the actions read and do.
  * @returns The actions, Cowork first.
  */
@@ -56,16 +59,68 @@ export function handoffActions(deps: HandoffDependencies): TodoAction[] {
     unavailable: () => (existsSync(CLAUDE_DESKTOP) ? null : "Install Claude Desktop first"),
     run: (todo) => startCowork(deps, todo),
   };
-  const cli = join(deps.home, QBDCODE_CLI);
-  const chats = listWorktrees(join(deps.home, QBDVISION_REPO)).map(
-    (worktree): TodoAction => ({
-      id: `qbdcode:${worktree.path}`,
-      label: `Send to QbDCode in ${basename(worktree.path)} (${shortBranch(worktree.branch)})`,
-      unavailable: () => (existsSync(cli) ? null : "Install QbDCode first"),
-      run: (todo) => startQbdcodeChat(deps, todo, worktree),
-    }),
-  );
-  return [cowork, ...chats];
+  const qbdcode: TodoAction = {
+    id: "qbdcode",
+    label: "Send to QbDCode…",
+    dialog: "qbdcode",
+    unavailable: () => qbdcodeUnavailable(deps),
+    run: () => Promise.reject(new Error("QbDCode chats are started from the popup.")),
+  };
+  return [cowork, qbdcode];
+}
+
+/**
+ * Why a QbDCode chat can't be started yet.
+ * @param deps Where your home folder is.
+ * @returns The reason, or null when QbDCode and a qbdvision worktree are there.
+ */
+function qbdcodeUnavailable(deps: Pick<HandoffDependencies, "home">): string | null {
+  if (!existsSync(join(deps.home, QBDCODE_CLI))) {
+    return "Install QbDCode first";
+  }
+  if (listWorktrees(join(deps.home, QBDVISION_REPO)).length === 0) {
+    return `No checkout at ~/${QBDVISION_REPO}`;
+  }
+  return null;
+}
+
+/**
+ * What the QbDCode popup starts with: the instructions written from the item, and the worktrees to pick from.
+ * @param deps What the hand-off reads.
+ * @param todo The item.
+ * @returns The instructions and the worktrees, the main checkout first.
+ */
+export function prepareQbdcodeHandoff(deps: Pick<HandoffDependencies, "home" | "callTranscript">, todo: Todo): QbdcodeHandoff {
+  return {
+    text: handoffText(todo, deps),
+    worktrees: listWorktrees(join(deps.home, QBDVISION_REPO)).map((worktree) => ({
+      path: worktree.path,
+      label: `${basename(worktree.path)} (${shortBranch(worktree.branch)})`,
+    })),
+  };
+}
+
+/**
+ * Starts the QbDCode chat set out in the popup. The folder must be one of your qbdvision worktrees, so the window
+ * can't point the agent anywhere else.
+ * @param deps What the hand-off reads and does.
+ * @param path The worktree picked.
+ * @param text The instructions as edited.
+ * @returns Where it went.
+ */
+export async function sendToQbdcode(deps: HandoffDependencies, path: unknown, text: unknown): Promise<Omit<TodoSent, "at">> {
+  const unavailable = qbdcodeUnavailable(deps);
+  if (unavailable) {
+    throw new Error(unavailable);
+  }
+  const worktree = listWorktrees(join(deps.home, QBDVISION_REPO)).find((candidate) => candidate.path === path);
+  if (!worktree) {
+    throw new Error("Pick one of your qbdvision worktrees.");
+  }
+  if (typeof text !== "string" || text.trim() === "" || text.length > MAX_QBDCODE_CHARS) {
+    throw new Error(`Write the instructions, in up to ${MAX_QBDCODE_CHARS.toLocaleString()} characters.`);
+  }
+  return startQbdcodeChat(deps, worktree, text.trim());
 }
 
 /**
@@ -81,18 +136,18 @@ export async function startCowork(deps: HandoffDependencies, todo: Todo): Promis
 }
 
 /**
- * Opens a new QbDCode chat in a worktree that starts on the item straight away.
+ * Opens a new QbDCode chat in a worktree that starts on the instructions straight away.
  * @param deps What the actions read and do.
- * @param todo The item.
  * @param worktree Where the chat works.
+ * @param text The instructions.
  * @returns Where it went.
  */
-export async function startQbdcodeChat(deps: HandoffDependencies, todo: Todo, worktree: Worktree): Promise<Omit<TodoSent, "at">> {
+export async function startQbdcodeChat(deps: HandoffDependencies, worktree: Worktree, text: string): Promise<Omit<TodoSent, "at">> {
   if (!existsSync(worktree.path)) {
     throw new Error(`${worktree.path} isn't there any more.`);
   }
   const cli = join(deps.home, QBDCODE_CLI);
-  const printed = await deps.run("/bin/bash", [cli, "chat", worktree.path, "--prompt", handoffText(todo, deps)], {
+  const printed = await deps.run("/bin/bash", [cli, "chat", worktree.path, "--prompt", text], {
     HOME: deps.home,
     PATH: PROGRAM_PATH,
   });

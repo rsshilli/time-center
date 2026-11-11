@@ -63,7 +63,7 @@ import { handleScreenshotScheme, registerScreenshotScheme } from "./screenshots/
 import { enableStartAtLoginOnce } from "./startAtLogin";
 import { SecretStore } from "./store/SecretStore";
 import { Store } from "./store/Store";
-import { type HandoffDependencies, handoffActions } from "./todos/handoff";
+import { type HandoffDependencies, handoffActions, prepareQbdcodeHandoff, sendToQbdcode } from "./todos/handoff";
 import { createJiraTicket, jiraActions, readJiraSettings, saveJiraSettings, searchAssignees } from "./todos/jira";
 import { draftJiraTicket } from "./todos/jiraDraft";
 import { registerTodoIpc } from "./todos/todoIpc";
@@ -294,6 +294,8 @@ async function main(): Promise<void> {
       draftJiraTicket({ jira, claude: sonnet, callTranscript: handoff.callTranscript }, todo, current, instruction),
     searchJiraUsers: (query) => searchAssignees(jira, query),
     createJiraTicket: (todo, draft) => createJiraTicket(jira, todo, draft),
+    prepareQbdcodeHandoff: (todo) => prepareQbdcodeHandoff(handoff, todo),
+    sendToQbdcode: (path, text) => sendToQbdcode(handoff, path, text),
     now: () => Date.now(),
   });
   handleScreenshotScheme(activity);

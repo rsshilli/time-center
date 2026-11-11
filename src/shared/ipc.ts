@@ -440,8 +440,19 @@ export interface TodoActionInfo {
   label: string;
   /** Why it can't run yet (e.g. "Set up Jira in Settings first"); null when it's ready. */
   unavailable: string | null;
-  /** "jira" when it opens the Jira popup instead of running straight away; null otherwise. */
-  dialog: "jira" | null;
+  /** The popup it opens instead of running straight away, or null when it runs from the menu. */
+  dialog: TodoDialog | null;
+}
+
+/** The popups an item's menu can open. */
+export type TodoDialog = "jira" | "qbdcode";
+
+/** What the QbDCode popup starts with. */
+export interface QbdcodeHandoff {
+  /** The instructions written from the item: the item, its call, and what was said around then. */
+  text: string;
+  /** Your qbdvision worktrees, the main checkout first. */
+  worktrees: { path: string; label: string }[];
 }
 
 /** Someone a Jira ticket can be assigned to. */
@@ -467,8 +478,8 @@ export interface JiraDraft {
 export interface JiraDraftResult {
   draft: JiraDraft;
   issueTypes: string[];
-  /** The Engineering Team choices; empty when the project has no such field. */
-  teams: string[];
+  /** Each type's Engineering Team choices; empty for a type without that field. */
+  teamsByType: Record<string, string[]>;
   /** Something to tell you about the proposal, e.g. that the person named couldn't be found in Jira. */
   note: string | null;
 }
@@ -549,6 +560,8 @@ export const IPC = {
   draftJiraTicket: "jira:draft",
   searchJiraUsers: "jira:users",
   createJiraTicket: "jira:create",
+  prepareQbdcodeHandoff: "qbdcode:prepare",
+  sendToQbdcode: "qbdcode:send",
   nameSpeaker: "speakers:name",
   setLineNotYou: "lines:set-not-you",
   getVoices: "voices:get",
@@ -653,6 +666,10 @@ export interface TimeCenterApi {
   searchJiraUsers(query: string): Promise<JiraUser[]>;
   /** Makes the ticket and returns the list with it recorded on the item. */
   createJiraTicket(todoId: number, draft: JiraDraft): Promise<Todo[]>;
+  /** The instructions and worktrees the QbDCode popup starts with. */
+  prepareQbdcodeHandoff(todoId: number): Promise<QbdcodeHandoff>;
+  /** Starts a QbDCode chat in a worktree on the instructions, and returns the list with it recorded on the item. */
+  sendToQbdcode(todoId: number, worktreePath: string, text: string): Promise<Todo[]>;
   /** Says who a call speaker is (their voice is then recognized in other calls), or null for "Speaker N". */
   nameSpeaker(speakerId: number, name: string | null): Promise<void>;
   /**

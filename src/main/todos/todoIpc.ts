@@ -4,6 +4,8 @@ import {
   type JiraDraftResult,
   type JiraUser,
   MAX_TODO_CHARS,
+  type QbdcodeHandoff,
+  type TodoDialog,
   type NewTodo,
   TODO_SECTIONS,
   type Todo,
@@ -25,8 +27,8 @@ export interface TodoAction {
   id: string;
   /** The menu label. */
   label: string;
-  /** "jira" when the menu opens the Jira popup instead of running it. */
-  dialog?: "jira";
+  /** The popup the menu opens instead of running it. */
+  dialog?: TodoDialog;
   /** Why it can't run yet, or null when it can. */
   unavailable(): string | null;
   /** Sends the item; returns where it went (the time is added for it). */
@@ -46,6 +48,10 @@ export interface TodoIpcDependencies {
   searchJiraUsers(query: unknown): Promise<JiraUser[]>;
   /** Makes the ticket; returns where it went. */
   createJiraTicket(todo: Todo, draft: unknown): Promise<Omit<TodoSent, "at">>;
+  /** The instructions and worktrees the QbDCode popup starts with. */
+  prepareQbdcodeHandoff(todo: Todo): QbdcodeHandoff;
+  /** Starts the QbDCode chat; returns where it went. */
+  sendToQbdcode(worktreePath: unknown, text: unknown): Promise<Omit<TodoSent, "at">>;
   now(): number;
 }
 
@@ -96,20 +102,31 @@ export function registerTodoIpc(deps: TodoIpcDependencies): void {
   );
   ipcMain.handle(IPC.searchJiraUsers, (_event, query: unknown) => deps.searchJiraUsers(query));
   ipcMain.handle(IPC.createJiraTicket, async (_event, id: unknown, draft: unknown) => {
-    await recordJiraTicket(deps, assertRowId(id), draft);
+    await recordSent(deps, assertRowId(id), "jira", (todo) => deps.createJiraTicket(todo, draft));
+    return list();
+  });
+  ipcMain.handle(IPC.prepareQbdcodeHandoff, (_event, id: unknown) => deps.prepareQbdcodeHandoff(openTodo(deps.store, assertRowId(id))));
+  ipcMain.handle(IPC.sendToQbdcode, async (_event, id: unknown, path: unknown, text: unknown) => {
+    await recordSent(deps, assertRowId(id), "qbdcode", () => deps.sendToQbdcode(path, text));
     return list();
   });
 }
 
 /**
- * Makes the Jira ticket from the popup and records it on the item.
- * @param deps The list, the ticket maker and the clock.
+ * Sends an item from one of its popups and records where it went.
+ * @param deps The list and the clock.
  * @param id The item.
- * @param draft The ticket as the popup sent it.
+ * @param action The popup's action, saved with the record, e.g. "jira".
+ * @param send Sends the item; returns where it went.
  */
-export async function recordJiraTicket(deps: Pick<TodoIpcDependencies, "store" | "createJiraTicket" | "now">, id: number, draft: unknown): Promise<void> {
-  const sent = await deps.createJiraTicket(openTodo(deps.store, id), draft);
-  deps.store.addSent(id, { ...sent, action: "jira", at: deps.now() });
+export async function recordSent(
+  deps: Pick<TodoIpcDependencies, "store" | "now">,
+  id: number,
+  action: string,
+  send: (todo: Todo) => Promise<Omit<TodoSent, "at">>,
+): Promise<void> {
+  const sent = await send(openTodo(deps.store, id));
+  deps.store.addSent(id, { ...sent, action, at: deps.now() });
 }
 
 /**

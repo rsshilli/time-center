@@ -4,7 +4,7 @@ import { formatClock } from "../../shared/transcript";
 import type { HaikuClient } from "../calendar/BedrockHaiku";
 import { readAnswer } from "../recording/callQuestions";
 import { type HandoffDependencies, transcriptAround } from "./handoff";
-import { assertJiraDraft, type JiraDependencies, myself, readJiraSettings, searchAssignees, teamField } from "./jira";
+import { assertJiraDraft, type JiraDependencies, myself, readJiraSettings, searchAssignees, teamFields } from "./jira";
 import { summaryOf } from "./markdownToAdf";
 
 /** The most Sonnet may write for one ticket. */
@@ -12,6 +12,9 @@ const MAX_DRAFT_TOKENS = 2_000;
 
 /** The longest change you can ask Sonnet for. */
 export const MAX_INSTRUCTION_CHARS = 2_000;
+
+/** Room left at the end of a long description for the sections a story or bug needs. */
+const SECTION_ROOM = 300;
 
 /** What Sonnet writes in the assignee field to leave the ticket unassigned. */
 const UNASSIGNED = "unassigned";
@@ -64,21 +67,26 @@ export async function draftJiraTicket(deps: JiraDraftDependencies, todo: Todo, c
   const issueTypes = readJiraSettings(deps.jira).issueTypes;
   const before = current === null || current === undefined ? null : assertJiraDraft(current, issueTypes);
   const change = assertInstruction(instruction, before !== null);
-  const [me, firstTeams] = await Promise.all([myself(deps.jira), teamChoices(deps.jira, before?.issueType ?? issueTypes[0])]);
-  const reply = await deps.claude.invoke(buildDraftRequest(todo, deps, { me, issueTypes, teams: firstTeams, before, change }));
+  const [me, fields] = await Promise.all([myself(deps.jira), teamFields(deps.jira, issueTypes)]);
+  const teamsByType = Object.fromEntries(issueTypes.map((type) => [type, fields.get(type)?.choices ?? []]));
+  // Sonnet sees the teams of the type it starts from; in QI every type has the same ones.
+  const startType = before?.issueType ?? issueTypes[0];
+  const reply = await deps.claude.invoke(buildDraftRequest(todo, deps, { me, issueTypes, teams: teamsByType[startType], before, change }));
   const proposal = readProposal(readAnswer(reply));
 
-  const issueType = proposal.issueType !== null && issueTypes.includes(proposal.issueType) ? proposal.issueType : (before?.issueType ?? issueTypes[0]);
-  const teams = issueType === (before?.issueType ?? issueTypes[0]) ? firstTeams : await teamChoices(deps.jira, issueType);
+  const issueType = proposal.issueType !== null && issueTypes.includes(proposal.issueType) ? proposal.issueType : startType;
+  const teams = teamsByType[issueType];
   const { assignee, note } = await pickAssignee(deps.jira, proposal.assignee, me, before);
+  // Cut to length before adding the required sections, so they're never what gets cut.
+  const written = (proposal.description ?? before?.description ?? todo.markdown).trim().slice(0, MAX_JIRA_DESCRIPTION_CHARS - SECTION_ROOM);
   const draft: JiraDraft = {
     issueType,
     summary: oneLine(proposal.summary) ?? before?.summary ?? summaryOf(todo.markdown),
-    description: withRequiredSections((proposal.description ?? before?.description ?? todo.markdown).trim(), issueType).slice(0, MAX_JIRA_DESCRIPTION_CHARS),
+    description: withRequiredSections(written, issueType),
     assignee,
-    team: proposal.team !== null && teams.includes(proposal.team) ? proposal.team : null,
+    team: [proposal.team, before?.team ?? null].find((team): team is string => team !== null && teams.includes(team)) ?? null,
   };
-  return { draft, issueTypes, teams, note };
+  return { draft, issueTypes, teamsByType, note };
 }
 
 /**
@@ -96,16 +104,6 @@ function assertInstruction(value: unknown, revising: boolean): string | null {
     throw new Error(`Say what to change, in up to ${MAX_INSTRUCTION_CHARS.toLocaleString()} characters.`);
   }
   return text;
-}
-
-/**
- * The Engineering Team choices for a type of ticket.
- * @param jira Jira's settings and fetch.
- * @param issueType The type.
- * @returns The choices, or none when that type has no such field.
- */
-async function teamChoices(jira: JiraDependencies, issueType: string): Promise<string[]> {
-  return (await teamField(jira, issueType))?.choices ?? [];
 }
 
 /**
@@ -172,6 +170,7 @@ export function readProposal(text: string): Proposal {
       // Unreadable: every field falls back below.
     }
   }
+  /** One field of the reply: its trimmed text, or null when it's missing, empty or not text. */
   const field = (key: string) => (typeof parsed[key] === "string" && (parsed[key] as string).trim() !== "" ? (parsed[key] as string).trim() : null);
   if (Object.keys(parsed).length === 0) {
     throw new Error("Sonnet didn't send back a ticket. Try again.");
@@ -180,13 +179,14 @@ export function readProposal(text: string): Proposal {
 }
 
 /**
- * Finds the person Sonnet named in Jira. No name means you; a name you'd already picked keeps that account;
- * a name Jira can't find falls back to you, with a note saying so.
+ * Finds the person Sonnet named in Jira. On a first draft, no name means you; on a change, no name keeps whoever
+ * it was assigned to (or nobody). A name you'd already picked keeps that account. A name Jira can't pin down falls
+ * back the same way, with a note saying so; a single loose match is taken, with a note to check it.
  * @param jira Jira's settings and fetch.
  * @param name The name Sonnet gave, or null.
  * @param me You.
  * @param before The draft being changed, or null.
- * @returns The assignee, and a note when the named person wasn't found.
+ * @returns The assignee, and a note when the named person wasn't found for sure.
  */
 export async function pickAssignee(
   jira: JiraDependencies,
@@ -194,23 +194,30 @@ export async function pickAssignee(
   me: JiraUser | null,
   before: JiraDraft | null,
 ): Promise<{ assignee: JiraUser | null; note: string | null }> {
+  const fallback = before ? before.assignee : me;
   if (name !== null && name.toLowerCase() === UNASSIGNED) {
     return { assignee: null, note: null };
   }
-  if (name === null || (me !== null && sameName(name, me.displayName))) {
+  if (name === null) {
+    return { assignee: fallback, note: null };
+  }
+  if (me !== null && sameName(name, me.displayName)) {
     return { assignee: me, note: null };
   }
   if (before?.assignee && sameName(name, before.assignee.displayName)) {
     return { assignee: before.assignee, note: null };
   }
   const found = await searchAssignees(jira, name);
-  const match = found.find((user) => sameName(name, user.displayName)) ?? (found.length === 1 ? found[0] : undefined);
-  if (match) {
-    return { assignee: match, note: null };
+  const exact = found.find((user) => sameName(name, user.displayName));
+  if (exact) {
+    return { assignee: exact, note: null };
   }
-  const who = me ? "you" : "nobody";
+  if (found.length === 1) {
+    return { assignee: found[0], note: `Assigned to ${found[0].displayName}, the closest match for "${name}". Check it's the right person.` };
+  }
+  const who = fallback === null ? "nobody" : fallback === me ? "you" : fallback.displayName;
   return {
-    assignee: me,
+    assignee: fallback,
     note: found.length > 1 ? `Several people match "${name}", so it's assigned to ${who}. Pick one below.` : `Couldn't find "${name}" in Jira, so it's assigned to ${who}.`,
   };
 }
@@ -222,6 +229,7 @@ export async function pickAssignee(
  * @returns True when they match.
  */
 function sameName(a: string, b: string): boolean {
+  /** A name in lower case with single spaces. */
   const tidy = (name: string) => name.toLowerCase().replace(/\s+/g, " ").trim();
   return tidy(a) === tidy(b);
 }

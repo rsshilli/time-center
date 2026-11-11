@@ -141,11 +141,22 @@ The app asks only for read-only calendar access (`calendar.readonly`).
 ### Jira (making tickets from TODOs)
 
 Under **Settings → Jira**, enter your Jira site (QbDVision's is filled in), the email you sign in with, an
-API token (id.atlassian.com → Security → API tokens), the project key and the type of ticket (QI and Task
-to start). **Check and save** tries them against Jira before saving. The token is encrypted with a key in
-your Mac's Keychain and never shown again. A TODO's ⋯ → **Make a Jira ticket** creates the ticket assigned
-to you: the item's first line is the summary, and the whole item, with its formatting, links and the call
-it came from, is the description. The ticket's number then shows under the item as a link.
+API token (id.atlassian.com → Security → API tokens), the project key and the types of ticket to choose
+from (QI with Task, Story (FRS), Epic (URS) and Bug to start). **Check and save** tries them against Jira
+before saving. The token is encrypted with a key in your Mac's Keychain and never shown again.
+
+A TODO's ⋯ → **Make a Jira ticket…** opens a popup where Sonnet proposes the type, summary, description,
+assignee (whoever took it on in the call, else you) and Engineering Team, from the item and what was said
+around it in the call. Edit any field, search Jira for another assignee, or type a change for Sonnet to make
+("make it a bug for Platform"). A story always gets an **Acceptance Criteria** section; a bug gets **Steps to
+reproduce** and **Expected / Actual**. Nothing goes to Jira until **Create ticket**; the ticket's number then
+shows under the item as a link.
+
+### Handing a TODO to Claude
+
+A TODO's ⋯ → **Start a Claude Cowork task** opens a new Cowork task in Claude Desktop with the item filled in.
+**Send to QbDCode…** opens a popup with the instructions (the item, its call, and what was said around then),
+ready to edit, and a list of your qbdvision worktrees; **Send** starts a QbDCode chat in the one you pick.
 
 ### Weekly backup to S3
 

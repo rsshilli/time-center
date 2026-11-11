@@ -5,6 +5,7 @@ import type { CallSpeaker, Todo, TranscriptLine } from "../../src/shared/ipc";
 import {
   type HandoffDependencies,
   MAX_COWORK_CHARS,
+  MAX_QBDCODE_CHARS,
   QBDCODE_CLI,
   QBDVISION_REPO,
   cutText,
@@ -12,6 +13,8 @@ import {
   handoffText,
   listWorktrees,
   nearestTurns,
+  prepareQbdcodeHandoff,
+  sendToQbdcode,
   shortBranch,
   startCowork,
   startQbdcodeChat,
@@ -205,16 +208,16 @@ describe("handoff", () => {
   });
 
   describe("startQbdcodeChat", () => {
-    it("should ask QbDCode for a chat in the worktree that starts on the item", async () => {
+    it("should ask QbDCode for a chat in the worktree that starts on the instructions", async () => {
       const deps = fakeDeps(root);
       const folder = join(root, "qbdvision2");
       mkdirSync(folder);
 
-      const sent = await startQbdcodeChat(deps, todo(), { path: folder, branch: "two" });
+      const sent = await startQbdcodeChat(deps, { path: folder, branch: "two" }, "Fix the export");
 
       expect(deps.run).toHaveBeenCalledWith(
         "/bin/bash",
-        [join(root, QBDCODE_CLI), "chat", folder, "--prompt", handoffText(todo(), deps)],
+        [join(root, QBDCODE_CLI), "chat", folder, "--prompt", "Fix the export"],
         expect.objectContaining({ HOME: root, PATH: expect.stringContaining("/usr/bin") }),
       );
       expect(sent).toEqual({ action: "qbdcode", label: "QbDCode · qbdvision2", url: null });
@@ -224,9 +227,48 @@ describe("handoff", () => {
       const deps = { ...fakeDeps(root), run: vi.fn(async () => "no such directory: /x\n") };
       const folder = join(root, "qbdvision2");
 
-      await expect(startQbdcodeChat(deps, todo(), { path: folder, branch: "two" })).rejects.toThrow("isn't there any more");
+      await expect(startQbdcodeChat(deps, { path: folder, branch: "two" }, "x")).rejects.toThrow("isn't there any more");
       mkdirSync(folder);
-      await expect(startQbdcodeChat(deps, todo(), { path: folder, branch: "two" })).rejects.toThrow("no such directory");
+      await expect(startQbdcodeChat(deps, { path: folder, branch: "two" }, "x")).rejects.toThrow("no such directory");
+    });
+  });
+
+  describe("prepareQbdcodeHandoff", () => {
+    it("should start the popup with the item's instructions and every worktree, the main checkout first", () => {
+      const repo = fakeRepo(join(root, "projects"), "ref: refs/heads/main\n", [{ name: "qbdvision2", head: "ref: refs/heads/ryan-QI-16649-Fix\n" }]);
+      const deps = fakeDeps(root);
+
+      expect(prepareQbdcodeHandoff(deps, todo())).toEqual({
+        text: handoffText(todo(), deps),
+        worktrees: [
+          { path: repo, label: "qbdvision (main)" },
+          { path: join(root, "projects", "qbdvision2"), label: "qbdvision2 (QI-16649)" },
+        ],
+      });
+    });
+  });
+
+  describe("sendToQbdcode", () => {
+    it("should send the edited instructions to the worktree picked, and only to one of your worktrees", async () => {
+      fakeRepo(join(root, "projects"), "ref: refs/heads/main\n", [{ name: "qbdvision2", head: "ref: refs/heads/two\n" }]);
+      mkdirSync(join(root, ".local", "bin"), { recursive: true });
+      writeFileSync(join(root, QBDCODE_CLI), "");
+      const deps = fakeDeps(root);
+      const folder = join(root, "projects", "qbdvision2");
+
+      await sendToQbdcode(deps, folder, "  Fix the export, then open a PR  ");
+
+      expect(deps.run).toHaveBeenCalledWith("/bin/bash", [join(root, QBDCODE_CLI), "chat", folder, "--prompt", "Fix the export, then open a PR"], expect.anything());
+      await expect(sendToQbdcode(deps, "/etc", "x")).rejects.toThrow(/Pick one of your qbdvision worktrees/);
+      await expect(sendToQbdcode(deps, folder, "   ")).rejects.toThrow(/Write the instructions/);
+      await expect(sendToQbdcode(deps, folder, "x".repeat(MAX_QBDCODE_CHARS + 1))).rejects.toThrow(/Write the instructions/);
+      expect(deps.run).toHaveBeenCalledTimes(1);
+    });
+
+    it("should refuse when QbDCode isn't installed", async () => {
+      fakeRepo(join(root, "projects"), "ref: refs/heads/main\n", []);
+
+      await expect(sendToQbdcode(fakeDeps(root), join(root, QBDVISION_REPO), "x")).rejects.toThrow("Install QbDCode first");
     });
   });
 
@@ -238,22 +280,21 @@ describe("handoff", () => {
   });
 
   describe("handoffActions", () => {
-    it("should offer Cowork first, then one QbDCode chat per worktree, each saying what's missing to run it", () => {
-      const repo = fakeRepo(join(root, "projects"), "ref: refs/heads/main\n", [{ name: "qbdvision2", head: "ref: refs/heads/two\n" }]);
-
+    it("should offer Cowork, then one QbDCode entry that opens the popup, saying what's missing to use it", async () => {
       expect(handoffActions(fakeDeps(root))[1].unavailable()).toBe("Install QbDCode first");
       mkdirSync(join(root, ".local", "bin"), { recursive: true });
       writeFileSync(join(root, QBDCODE_CLI), "");
+      expect(handoffActions(fakeDeps(root))[1].unavailable()).toBe(`No checkout at ~/${QBDVISION_REPO}`);
+      const repo = fakeRepo(join(root, "projects"), "ref: refs/heads/main\n", [{ name: "qbdvision2", head: "ref: refs/heads/two\n" }]);
       const ready = handoffActions(fakeDeps(root));
 
-      expect(ready.map((action) => action.label)).toEqual([
-        "Start a Claude Cowork task",
-        "Send to QbDCode in qbdvision (main)",
-        "Send to QbDCode in qbdvision2 (two)",
+      expect(ready.map((action) => [action.id, action.label, action.dialog])).toEqual([
+        ["cowork", "Start a Claude Cowork task", undefined],
+        ["qbdcode", "Send to QbDCode…", "qbdcode"],
       ]);
       expect(repo).toBe(join(root, QBDVISION_REPO));
-      expect(ready[1].id).toBe(`qbdcode:${repo}`);
       expect(ready[1].unavailable()).toBeNull();
+      await expect(ready[1].run(todo())).rejects.toThrow(/popup/);
     });
   });
 });

@@ -1,7 +1,7 @@
 import { MAX_TODO_CHARS } from "../../src/shared/ipc";
 import { Store } from "../../src/main/store/Store";
 import { TodoStore } from "../../src/main/todos/TodoStore";
-import { type TodoAction, assertLayout, assertNewTodo, describeActions, recordJiraTicket, runTodoAction } from "../../src/main/todos/todoIpc";
+import { type TodoAction, assertLayout, assertNewTodo, describeActions, recordSent, runTodoAction } from "../../src/main/todos/todoIpc";
 
 const NOW = new Date(2026, 10, 10, 9).getTime();
 
@@ -62,16 +62,16 @@ describe("todoIpc", () => {
     expect(popup.run).not.toHaveBeenCalled();
   });
 
-  it("should record the ticket made from the popup on the item, or refuse a deleted item", async () => {
+  it("should record what a popup sent on the item under the popup's action, or refuse a deleted item", async () => {
     const id = todos.addTodo({ markdown: "a", section: "work", source: null }, NOW);
-    const createJiraTicket = vi.fn(async () => ({ action: "ignored", label: "QI-5", url: "https://x/QI-5" }));
+    const send = vi.fn(async () => ({ action: "ignored", label: "QI-5", url: "https://x/QI-5" }));
 
-    await recordJiraTicket({ store: todos, createJiraTicket, now: () => NOW }, id, { summary: "a" });
+    await recordSent({ store: todos, now: () => NOW }, id, "jira", send);
 
-    expect(createJiraTicket).toHaveBeenCalledWith(expect.objectContaining({ id }), { summary: "a" });
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ id }));
     expect(todos.getTodo(id)?.sent).toEqual([{ action: "jira", label: "QI-5", url: "https://x/QI-5", at: NOW }]);
-    await expect(recordJiraTicket({ store: todos, createJiraTicket, now: () => NOW }, 999, {})).rejects.toThrow(/no longer on your list/);
-    expect(createJiraTicket).toHaveBeenCalledTimes(1);
+    await expect(recordSent({ store: todos, now: () => NOW }, 999, "jira", send)).rejects.toThrow(/no longer on your list/);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it("should accept a new item with or without a call, and refuse one too long, with a bad call or no section", () => {
