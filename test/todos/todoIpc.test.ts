@@ -1,7 +1,7 @@
 import { MAX_TODO_CHARS } from "../../src/shared/ipc";
 import { Store } from "../../src/main/store/Store";
 import { TodoStore } from "../../src/main/todos/TodoStore";
-import { type TodoAction, assertLayout, assertNewTodo, describeActions, runTodoAction } from "../../src/main/todos/todoIpc";
+import { type TodoAction, assertLayout, assertNewTodo, describeActions, recordJiraTicket, runTodoAction } from "../../src/main/todos/todoIpc";
 
 const NOW = new Date(2026, 10, 10, 9).getTime();
 
@@ -47,10 +47,31 @@ describe("todoIpc", () => {
     expect(notReady.run).not.toHaveBeenCalled();
   });
 
-  it("should describe each action for the menu", () => {
-    expect(describeActions([action("Set up Jira in Settings first.")])).toEqual([
-      { id: "jira", label: "Make a Jira ticket", unavailable: "Set up Jira in Settings first." },
+  it("should describe each action for the menu, saying which open a popup", () => {
+    expect(describeActions([action("Set up Jira in Settings first."), { ...action(null), id: "jira-popup", dialog: "jira" }])).toEqual([
+      { id: "jira", label: "Make a Jira ticket", unavailable: "Set up Jira in Settings first.", dialog: null },
+      { id: "jira-popup", label: "Make a Jira ticket", unavailable: null, dialog: "jira" },
     ]);
+  });
+
+  it("should never run a popup action straight from the menu", async () => {
+    const id = todos.addTodo({ markdown: "a", section: "work", source: null }, NOW);
+    const popup = { ...action(null), dialog: "jira" as const };
+
+    await expect(runTodoAction({ store: todos, actions: [popup], now: () => NOW }, id, "jira")).rejects.toThrow(/isn't something/);
+    expect(popup.run).not.toHaveBeenCalled();
+  });
+
+  it("should record the ticket made from the popup on the item, or refuse a deleted item", async () => {
+    const id = todos.addTodo({ markdown: "a", section: "work", source: null }, NOW);
+    const createJiraTicket = vi.fn(async () => ({ action: "ignored", label: "QI-5", url: "https://x/QI-5" }));
+
+    await recordJiraTicket({ store: todos, createJiraTicket, now: () => NOW }, id, { summary: "a" });
+
+    expect(createJiraTicket).toHaveBeenCalledWith(expect.objectContaining({ id }), { summary: "a" });
+    expect(todos.getTodo(id)?.sent).toEqual([{ action: "jira", label: "QI-5", url: "https://x/QI-5", at: NOW }]);
+    await expect(recordJiraTicket({ store: todos, createJiraTicket, now: () => NOW }, 999, {})).rejects.toThrow(/no longer on your list/);
+    expect(createJiraTicket).toHaveBeenCalledTimes(1);
   });
 
   it("should accept a new item with or without a call, and refuse one too long, with a bad call or no section", () => {

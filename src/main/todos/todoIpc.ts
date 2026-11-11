@@ -1,6 +1,8 @@
 import { ipcMain } from "electron";
 import {
   IPC,
+  type JiraDraftResult,
+  type JiraUser,
   MAX_TODO_CHARS,
   type NewTodo,
   TODO_SECTIONS,
@@ -23,6 +25,8 @@ export interface TodoAction {
   id: string;
   /** The menu label. */
   label: string;
+  /** "jira" when the menu opens the Jira popup instead of running it. */
+  dialog?: "jira";
   /** Why it can't run yet, or null when it can. */
   unavailable(): string | null;
   /** Sends the item; returns where it went (the time is added for it). */
@@ -37,6 +41,11 @@ export interface TodoIpcDependencies {
   /** Jira's settings, read and saved. */
   getJiraSettings(): unknown;
   saveJiraSettings(input: unknown): Promise<unknown>;
+  /** Has Sonnet propose a ticket for an item, or change the proposal. */
+  draftJiraTicket(todo: Todo, current: unknown, instruction: unknown): Promise<JiraDraftResult>;
+  searchJiraUsers(query: unknown): Promise<JiraUser[]>;
+  /** Makes the ticket; returns where it went. */
+  createJiraTicket(todo: Todo, draft: unknown): Promise<Omit<TodoSent, "at">>;
   now(): number;
 }
 
@@ -82,6 +91,39 @@ export function registerTodoIpc(deps: TodoIpcDependencies): void {
   });
   ipcMain.handle(IPC.getJiraSettings, () => deps.getJiraSettings());
   ipcMain.handle(IPC.saveJiraSettings, (_event, input: unknown) => deps.saveJiraSettings(input));
+  ipcMain.handle(IPC.draftJiraTicket, (_event, id: unknown, current: unknown, instruction: unknown) =>
+    deps.draftJiraTicket(openTodo(deps.store, assertRowId(id)), current, instruction),
+  );
+  ipcMain.handle(IPC.searchJiraUsers, (_event, query: unknown) => deps.searchJiraUsers(query));
+  ipcMain.handle(IPC.createJiraTicket, async (_event, id: unknown, draft: unknown) => {
+    await recordJiraTicket(deps, assertRowId(id), draft);
+    return list();
+  });
+}
+
+/**
+ * Makes the Jira ticket from the popup and records it on the item.
+ * @param deps The list, the ticket maker and the clock.
+ * @param id The item.
+ * @param draft The ticket as the popup sent it.
+ */
+export async function recordJiraTicket(deps: Pick<TodoIpcDependencies, "store" | "createJiraTicket" | "now">, id: number, draft: unknown): Promise<void> {
+  const sent = await deps.createJiraTicket(openTodo(deps.store, id), draft);
+  deps.store.addSent(id, { ...sent, action: "jira", at: deps.now() });
+}
+
+/**
+ * An item that's still on the list.
+ * @param store The list.
+ * @param id The item.
+ * @returns The item.
+ */
+function openTodo(store: Pick<TodoStore, "getTodo">, id: number): Todo {
+  const todo = store.getTodo(id);
+  if (!todo) {
+    throw new Error("That item is no longer on your list.");
+  }
+  return todo;
 }
 
 /**
@@ -90,7 +132,7 @@ export function registerTodoIpc(deps: TodoIpcDependencies): void {
  * @returns Their menu entries.
  */
 export function describeActions(actions: TodoAction[]): TodoActionInfo[] {
-  return actions.map((action) => ({ id: action.id, label: action.label, unavailable: action.unavailable() }));
+  return actions.map((action) => ({ id: action.id, label: action.label, unavailable: action.unavailable(), dialog: action.dialog ?? null }));
 }
 
 /**
@@ -101,17 +143,14 @@ export function describeActions(actions: TodoAction[]): TodoActionInfo[] {
  */
 export async function runTodoAction(deps: Pick<TodoIpcDependencies, "store" | "now"> & { actions: TodoAction[] }, id: number, actionId: unknown): Promise<void> {
   const action = deps.actions.find((candidate) => candidate.id === actionId);
-  if (!action) {
+  if (!action || action.dialog) {
     throw new Error("That isn't something an item can do.");
   }
   const unavailable = action.unavailable();
   if (unavailable) {
     throw new Error(unavailable);
   }
-  const todo = deps.store.getTodo(id);
-  if (!todo) {
-    throw new Error("That item is no longer on your list.");
-  }
+  const todo = openTodo(deps.store, id);
   const sent = await action.run(todo);
   deps.store.addSent(id, { ...sent, action: action.id, at: deps.now() });
 }

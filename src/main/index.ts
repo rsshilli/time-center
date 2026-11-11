@@ -64,7 +64,8 @@ import { enableStartAtLoginOnce } from "./startAtLogin";
 import { SecretStore } from "./store/SecretStore";
 import { Store } from "./store/Store";
 import { type HandoffDependencies, handoffActions } from "./todos/handoff";
-import { jiraActions, readJiraSettings, saveJiraSettings } from "./todos/jira";
+import { createJiraTicket, jiraActions, readJiraSettings, saveJiraSettings, searchAssignees } from "./todos/jira";
+import { draftJiraTicket } from "./todos/jiraDraft";
 import { registerTodoIpc } from "./todos/todoIpc";
 import { TodoStore } from "./todos/TodoStore";
 import { TrayController } from "./TrayController";
@@ -289,6 +290,10 @@ async function main(): Promise<void> {
     actions: () => [...jiraActions(jira), ...handoffActions(handoff)],
     getJiraSettings: () => readJiraSettings(jira),
     saveJiraSettings: (input) => saveJiraSettings(jira, input),
+    draftJiraTicket: (todo, current, instruction) =>
+      draftJiraTicket({ jira, claude: sonnet, callTranscript: handoff.callTranscript }, todo, current, instruction),
+    searchJiraUsers: (query) => searchAssignees(jira, query),
+    createJiraTicket: (todo, draft) => createJiraTicket(jira, todo, draft),
     now: () => Date.now(),
   });
   handleScreenshotScheme(activity);

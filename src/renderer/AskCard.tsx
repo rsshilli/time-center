@@ -254,8 +254,9 @@ export function isAbout(item: CallQuestion, recordingId: number): boolean {
  * @param props.onError Shows a dictation problem.
  * @param props.asking Whether a question is on its way.
  * @param props.placeholder The example shown while it's empty.
+ * @param props.label What the box is for, for screen readers.
  */
-function QuestionInput({
+export function QuestionInput({
   question,
   setQuestion,
   onAsk,
@@ -263,6 +264,7 @@ function QuestionInput({
   onError,
   asking,
   placeholder,
+  label = "Your question",
 }: {
   question: string;
   setQuestion(update: (typed: string) => string): void;
@@ -271,6 +273,7 @@ function QuestionInput({
   onError(problem: string | null): void;
   asking: boolean;
   placeholder: string;
+  label?: string;
 }) {
   /** ⌘↩ (or Ctrl+↩) asks. */
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -291,7 +294,7 @@ function QuestionInput({
         value={question}
         rows={2}
         placeholder={placeholder}
-        aria-label="Your question"
+        aria-label={label}
         onChange={(event) => {
           const typed = event.target.value;
           setQuestion(() => typed);

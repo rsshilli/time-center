@@ -440,7 +440,44 @@ export interface TodoActionInfo {
   label: string;
   /** Why it can't run yet (e.g. "Set up Jira in Settings first"); null when it's ready. */
   unavailable: string | null;
+  /** "jira" when it opens the Jira popup instead of running straight away; null otherwise. */
+  dialog: "jira" | null;
 }
+
+/** Someone a Jira ticket can be assigned to. */
+export interface JiraUser {
+  accountId: string;
+  displayName: string;
+}
+
+/** A Jira ticket as proposed in the popup, before it's made. */
+export interface JiraDraft {
+  /** One of the ticket types saved in Settings. */
+  issueType: string;
+  summary: string;
+  /** Markdown; it's turned into Jira's format when the ticket is made. */
+  description: string;
+  /** Null leaves the ticket unassigned. */
+  assignee: JiraUser | null;
+  /** One of the project's Engineering Team choices, or null for none. */
+  team: string | null;
+}
+
+/** A proposed ticket, with the choices the popup offers. */
+export interface JiraDraftResult {
+  draft: JiraDraft;
+  issueTypes: string[];
+  /** The Engineering Team choices; empty when the project has no such field. */
+  teams: string[];
+  /** Something to tell you about the proposal, e.g. that the person named couldn't be found in Jira. */
+  note: string | null;
+}
+
+/** The longest Jira summary Jira accepts. */
+export const MAX_JIRA_SUMMARY_CHARS = 255;
+
+/** The longest Jira description accepted from the popup, in characters of Markdown. */
+export const MAX_JIRA_DESCRIPTION_CHARS = 30_000;
 
 /** The Jira settings, as Settings shows them. The token itself never comes back to the window. */
 export interface JiraSettings {
@@ -509,6 +546,9 @@ export const IPC = {
   runTodoAction: "todos:run-action",
   getJiraSettings: "jira:get-settings",
   saveJiraSettings: "jira:save-settings",
+  draftJiraTicket: "jira:draft",
+  searchJiraUsers: "jira:users",
+  createJiraTicket: "jira:create",
   nameSpeaker: "speakers:name",
   setLineNotYou: "lines:set-not-you",
   getVoices: "voices:get",
@@ -603,6 +643,16 @@ export interface TimeCenterApi {
   getJiraSettings(): Promise<JiraSettings>;
   /** Saves the Jira settings after checking them against Jira; throws with Jira's answer when they don't work. */
   saveJiraSettings(input: JiraSettingsInput): Promise<JiraSettings>;
+  /**
+   * Has Sonnet propose a Jira ticket for an item, or change the proposal as asked.
+   * @param current The proposal as it stands in the popup, or null for a first draft.
+   * @param instruction What to change, e.g. "make it a bug for Platform"; null for a first draft.
+   */
+  draftJiraTicket(todoId: number, current: JiraDraft | null, instruction: string | null): Promise<JiraDraftResult>;
+  /** The people a ticket can be assigned to whose name or email matches. */
+  searchJiraUsers(query: string): Promise<JiraUser[]>;
+  /** Makes the ticket and returns the list with it recorded on the item. */
+  createJiraTicket(todoId: number, draft: JiraDraft): Promise<Todo[]>;
   /** Says who a call speaker is (their voice is then recognized in other calls), or null for "Speaker N". */
   nameSpeaker(speakerId: number, name: string | null): Promise<void>;
   /**

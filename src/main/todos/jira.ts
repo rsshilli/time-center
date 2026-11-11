@@ -1,7 +1,16 @@
-import type { JiraSettings, JiraSettingsInput, Todo, TodoSent } from "../../shared/ipc";
+import {
+  type JiraDraft,
+  type JiraSettings,
+  type JiraSettingsInput,
+  type JiraUser,
+  MAX_JIRA_DESCRIPTION_CHARS,
+  MAX_JIRA_SUMMARY_CHARS,
+  type Todo,
+  type TodoSent,
+} from "../../shared/ipc";
 import type { SecretStore } from "../store/SecretStore";
 import type { Store } from "../store/Store";
-import { type AdfNode, markdownToAdf, summaryOf } from "./markdownToAdf";
+import { type AdfNode, markdownToAdf } from "./markdownToAdf";
 import type { TodoAction } from "./todoIpc";
 
 /** Where the Jira settings live: the settings table, and the token in the secret store. */
@@ -34,25 +43,32 @@ export interface JiraDependencies {
 }
 
 /** Everything needed to call Jira. */
-interface JiraConfig {
+export interface JiraConfig {
   site: string;
   email: string;
   projectKey: string;
   token: string;
 }
 
+/** The Jira field that says which engineering team a ticket belongs to, found by this name. */
+export const TEAM_FIELD_NAME = "Engineering Team";
+
 /**
- * The menu entries Jira adds to a TODO: "Make a Jira Task", "Make a Jira Bug"… one per saved ticket type.
- * @param deps The saved settings and fetch.
- * @returns The actions, in the order the types were saved.
+ * The menu entry Jira adds to a TODO: "Make a Jira ticket…", which opens the popup where the ticket is drafted,
+ * changed and made, so it never runs straight from the menu.
+ * @param deps The saved settings.
+ * @returns The action.
  */
-export function jiraActions(deps: JiraDependencies): TodoAction[] {
-  return readJiraSettings(deps).issueTypes.map((issueType) => ({
-    id: `jira:${issueType}`,
-    label: `Make a Jira ${issueType}`,
-    unavailable: () => jiraUnavailable(deps),
-    run: (todo: Todo) => createJiraTicket(deps, todo, issueType),
-  }));
+export function jiraActions(deps: Pick<JiraDependencies, "settings" | "secrets">): TodoAction[] {
+  return [
+    {
+      id: "jira",
+      label: "Make a Jira ticket…",
+      dialog: "jira",
+      unavailable: () => jiraUnavailable(deps),
+      run: () => Promise.reject(new Error("Jira tickets are made from the popup.")),
+    },
+  ];
 }
 
 /**
@@ -167,25 +183,30 @@ export async function saveJiraSettings(deps: JiraDependencies, value: unknown): 
 }
 
 /**
- * Makes a Jira ticket from an item, assigned to you: its first line is the summary, the whole item (with its
- * formatting and links) the description, plus the call it came from.
+ * Makes the Jira ticket set out in the popup. The description gets a line naming the call the item came from.
  * @param deps The saved settings and fetch.
  * @param todo The item.
- * @param issueType The type of ticket, e.g. "Story (FRS)".
+ * @param value The ticket as the window sent it.
  * @returns Where it went, e.g. QI-1234 and its address.
  */
-export async function createJiraTicket(deps: JiraDependencies, todo: Todo, issueType: string): Promise<Omit<TodoSent, "at">> {
+export async function createJiraTicket(deps: JiraDependencies, todo: Todo, value: unknown): Promise<Omit<TodoSent, "at">> {
   const config = savedConfig(deps);
-  const me = (await jiraRequest(deps.fetch, config, "GET", "/rest/api/3/myself")) as { accountId?: string };
-  const created = (await jiraRequest(deps.fetch, config, "POST", "/rest/api/3/issue", {
-    fields: {
-      project: { key: config.projectKey },
-      issuetype: { name: issueType },
-      summary: summaryOf(todo.markdown),
-      description: describe(todo),
-      ...(me.accountId ? { assignee: { accountId: me.accountId } } : {}),
-    },
-  })) as { key?: string };
+  const draft = assertJiraDraft(value, readJiraSettings(deps).issueTypes);
+  const fields: Record<string, unknown> = {
+    project: { key: config.projectKey },
+    issuetype: { name: draft.issueType },
+    summary: draft.summary,
+    description: describe(todo, draft.description),
+    ...(draft.assignee ? { assignee: { accountId: draft.assignee.accountId } } : {}),
+  };
+  if (draft.team !== null) {
+    const team = await teamField(deps, draft.issueType);
+    if (!team || !team.choices.includes(draft.team)) {
+      throw new Error(`${config.projectKey} ${draft.issueType}s have no "${draft.team}" Engineering Team.`);
+    }
+    fields[team.id] = { value: draft.team };
+  }
+  const created = (await jiraRequest(deps.fetch, config, "POST", "/rest/api/3/issue", { fields })) as { key?: string };
   if (!created.key || !/^[A-Z][A-Z0-9_]*-\d+$/.test(created.key)) {
     throw new Error("Jira didn't say which ticket it made.");
   }
@@ -193,12 +214,123 @@ export async function createJiraTicket(deps: JiraDependencies, todo: Todo, issue
 }
 
 /**
- * The ticket's description: the item, then a line naming the call it came from.
+ * Checks a ticket sent by the window: a saved type, a one-line summary, a description and an assignee of the
+ * right sizes. The team is checked against Jira when the ticket is made.
+ * @param value What it sent.
+ * @param issueTypes The ticket types saved in Settings.
+ * @returns The ticket, its summary and description trimmed.
+ */
+export function assertJiraDraft(value: unknown, issueTypes: readonly string[]): JiraDraft {
+  const draft = value as Partial<JiraDraft> | null;
+  if (typeof draft !== "object" || draft === null) {
+    throw new Error("Not a Jira ticket.");
+  }
+  if (typeof draft.issueType !== "string" || !issueTypes.includes(draft.issueType)) {
+    throw new Error(`Pick a type of ticket: ${issueTypes.join(", ")}.`);
+  }
+  const summary = typeof draft.summary === "string" ? draft.summary.replace(/\s+/g, " ").trim() : "";
+  if (!summary || summary.length > MAX_JIRA_SUMMARY_CHARS) {
+    throw new Error(`Give the ticket a summary of up to ${MAX_JIRA_SUMMARY_CHARS} characters.`);
+  }
+  if (typeof draft.description !== "string" || draft.description.length > MAX_JIRA_DESCRIPTION_CHARS) {
+    throw new Error(`Keep the description to ${MAX_JIRA_DESCRIPTION_CHARS.toLocaleString()} characters.`);
+  }
+  const assignee = draft.assignee ?? null;
+  if (
+    assignee !== null &&
+    (typeof assignee.accountId !== "string" || !/^[\w:-]{1,128}$/.test(assignee.accountId) || typeof assignee.displayName !== "string")
+  ) {
+    throw new Error("Pick someone to assign it to from the list.");
+  }
+  const team = draft.team ?? null;
+  if (team !== null && (typeof team !== "string" || team.length > 100)) {
+    throw new Error("Pick an Engineering Team from the list.");
+  }
+  return {
+    issueType: draft.issueType,
+    summary,
+    description: draft.description.trim(),
+    assignee: assignee && { accountId: assignee.accountId, displayName: assignee.displayName },
+    team,
+  };
+}
+
+/**
+ * The project's Engineering Team field for a type of ticket: its id and its choices.
+ * @param deps The saved settings and fetch.
+ * @param issueType The type of ticket.
+ * @returns The field, or null when that type of ticket has none.
+ */
+export async function teamField(deps: JiraDependencies, issueType: string): Promise<{ id: string; choices: string[] } | null> {
+  const config = savedConfig(deps);
+  const project = encodeURIComponent(config.projectKey);
+  const types = (await jiraRequest(deps.fetch, config, "GET", `/rest/api/3/issue/createmeta/${project}/issuetypes`)) as {
+    issueTypes?: { id: string; name: string }[];
+  };
+  const type = (types.issueTypes ?? []).find((candidate) => candidate.name === issueType);
+  if (!type) {
+    return null;
+  }
+  const meta = (await jiraRequest(deps.fetch, config, "GET", `/rest/api/3/issue/createmeta/${project}/issuetypes/${encodeURIComponent(type.id)}?maxResults=200`)) as {
+    fields?: { fieldId: string; name: string; allowedValues?: { value?: string; disabled?: boolean }[] }[];
+  };
+  const field = (meta.fields ?? []).find((candidate) => candidate.name === TEAM_FIELD_NAME);
+  if (!field) {
+    return null;
+  }
+  const choices = (field.allowedValues ?? [])
+    .filter((choice) => !choice.disabled && typeof choice.value === "string")
+    .map((choice) => choice.value as string);
+  return { id: field.fieldId, choices };
+}
+
+/**
+ * The people in the project a ticket can be assigned to whose name or email matches.
+ * @param deps The saved settings and fetch.
+ * @param query What was typed, e.g. "Adr".
+ * @returns Up to ten of them.
+ */
+export async function searchAssignees(deps: JiraDependencies, query: unknown): Promise<JiraUser[]> {
+  if (typeof query !== "string" || query.trim() === "" || query.length > 100) {
+    return [];
+  }
+  const config = savedConfig(deps);
+  const params = new URLSearchParams({ project: config.projectKey, query: query.trim(), maxResults: "10" });
+  const users = (await jiraRequest(deps.fetch, config, "GET", `/rest/api/3/user/assignable/search?${params}`)) as unknown;
+  return Array.isArray(users) ? users.flatMap(readUser) : [];
+}
+
+/**
+ * You, as Jira knows you.
+ * @param deps The saved settings and fetch.
+ * @returns Your account, or null when Jira doesn't say.
+ */
+export async function myself(deps: JiraDependencies): Promise<JiraUser | null> {
+  const me = await jiraRequest(deps.fetch, savedConfig(deps), "GET", "/rest/api/3/myself");
+  return readUser(me)[0] ?? null;
+}
+
+/**
+ * Reads one person out of Jira's answer.
+ * @param value A user as Jira sent it.
+ * @returns The person, or nothing when it isn't one.
+ */
+function readUser(value: unknown): JiraUser[] {
+  const user = value as { accountId?: unknown; displayName?: unknown; active?: unknown } | null;
+  if (!user || typeof user.accountId !== "string" || typeof user.displayName !== "string" || user.active === false) {
+    return [];
+  }
+  return [{ accountId: user.accountId, displayName: user.displayName }];
+}
+
+/**
+ * The ticket's description: the text written for it, then a line naming the call the item came from.
  * @param todo The item.
+ * @param markdown The description as written, in Markdown.
  * @returns The document.
  */
-export function describe(todo: Todo): AdfNode {
-  const doc = markdownToAdf(todo.markdown);
+export function describe(todo: Todo, markdown: string): AdfNode {
+  const doc = markdownToAdf(markdown);
   if (todo.source) {
     const when = new Date(todo.source.saidAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
     doc.content = [
@@ -254,7 +386,7 @@ export function assertJiraSettingsInput(value: unknown): JiraSettingsInput {
  * @param deps Where they're kept.
  * @returns The config.
  */
-function savedConfig(deps: Pick<JiraDependencies, "settings" | "secrets">): JiraConfig {
+export function savedConfig(deps: Pick<JiraDependencies, "settings" | "secrets">): JiraConfig {
   const settings = readJiraSettings(deps);
   const token = deps.secrets.get(JIRA_KEYS.token);
   if (!settings.email || !token) {

@@ -1,5 +1,14 @@
-import type { Todo } from "../../src/shared/ipc";
-import { JIRA_KEYS, assertJiraSettingsInput, createJiraTicket, jiraActions, jiraUnavailable, readJiraSettings, saveJiraSettings } from "../../src/main/todos/jira";
+import type { JiraDraft, Todo } from "../../src/shared/ipc";
+import {
+  JIRA_KEYS,
+  assertJiraDraft,
+  assertJiraSettingsInput,
+  createJiraTicket,
+  jiraActions,
+  jiraUnavailable,
+  readJiraSettings,
+  saveJiraSettings,
+} from "../../src/main/todos/jira";
 
 const SITE = "https://example.atlassian.net";
 
@@ -60,6 +69,28 @@ const TODO: Todo = {
   sent: [],
 };
 
+/** A ticket as the popup sends it. */
+const DRAFT: JiraDraft = {
+  issueType: "Task",
+  summary: "Send Dana the keys",
+  description: "Send **Dana** the [keys](https://x.y)\n\n- by Friday",
+  assignee: { accountId: "dana-1", displayName: "Dana Scully" },
+  team: "Platform",
+};
+
+/** QI's ticket types and the Task's Engineering Team field, as Jira describes them. */
+const TEAM_META = {
+  "GET /rest/api/3/issue/createmeta/QI/issuetypes": { body: { issueTypes: [{ id: "10001", name: "Task" }, { id: "10004", name: "Bug" }] } },
+  "GET /rest/api/3/issue/createmeta/QI/issuetypes/10001": {
+    body: {
+      fields: [
+        { fieldId: "summary", name: "Summary" },
+        { fieldId: "customfield_10206", name: "Engineering Team", allowedValues: [{ value: "Platform" }, { value: "Bug" }, { value: "Old", disabled: true }] },
+      ],
+    },
+  },
+};
+
 describe("jira", () => {
   it("should show QbDVision's Jira, QI and its everyday ticket types before anything is saved, and say Jira isn't set up", () => {
     const stores = fakeStores();
@@ -91,23 +122,15 @@ describe("jira", () => {
     }
   });
 
-  it("should offer one menu entry per ticket type, each making a ticket of that type", async () => {
+  it("should offer one menu entry that opens the popup and never makes a ticket from the menu", async () => {
     const stores = fakeStores();
     stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
     stores.rawSecrets.set(JIRA_KEYS.token, "secret-token");
     stores.rawSettings.set(JIRA_KEYS.issueTypes, JSON.stringify(["Task", "Epic (URS)"]));
-    const { fetchJira, calls } = fakeFetch({
-      "GET /rest/api/3/myself": { body: {} },
-      "POST /rest/api/3/issue": { status: 201, body: { key: "QI-7" } },
-    });
-    const actions = jiraActions({ ...stores, fetch: fetchJira });
+    const actions = jiraActions(stores);
 
-    expect(actions.map((action) => [action.id, action.label, action.unavailable()])).toEqual([
-      ["jira:Task", "Make a Jira Task", null],
-      ["jira:Epic (URS)", "Make a Jira Epic (URS)", null],
-    ]);
-    await actions[1].run(TODO);
-    expect((JSON.parse(String(calls[1].init.body)) as { fields: { issuetype: unknown } }).fields.issuetype).toEqual({ name: "Epic (URS)" });
+    expect(actions.map((action) => [action.id, action.label, action.dialog, action.unavailable()])).toEqual([["jira", "Make a Jira ticket…", "jira", null]]);
+    await expect(actions[0].run(TODO)).rejects.toThrow(/popup/);
   });
 
   it("should check the settings against Jira, then save them with the token kept as a secret", async () => {
@@ -179,35 +202,49 @@ describe("jira", () => {
     stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
     stores.rawSecrets.set(JIRA_KEYS.token, "secret-token");
     const { fetchJira } = fakeFetch({
-      "GET /rest/api/3/myself": { body: { accountId: "abc" } },
       "POST /rest/api/3/issue": { body: { key: "../../evil" } },
     });
 
-    await expect(createJiraTicket({ ...stores, fetch: fetchJira }, { id: 1, markdown: "Do it", section: "work", createdAt: 0, doneAt: null, source: null, sent: [] }, "Task")).rejects.toThrow(/didn't say which ticket/);
+    await expect(createJiraTicket({ ...stores, fetch: fetchJira }, TODO, { ...DRAFT, team: null })).rejects.toThrow(/didn't say which ticket/);
   });
 
-  it("should make a ticket assigned to you, with the first line as summary and the item and call as description", async () => {
+  it("should make the ticket as drafted, with its assignee, Engineering Team and the call in the description", async () => {
     const stores = fakeStores();
     stores.rawSettings.set(JIRA_KEYS.site, SITE);
     stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
     stores.rawSecrets.set(JIRA_KEYS.token, "secret-token");
     const { fetchJira, calls } = fakeFetch({
-      "GET /rest/api/3/myself": { body: { accountId: "abc" } },
+      ...TEAM_META,
       "POST /rest/api/3/issue": { status: 201, body: { key: "QI-1234" } },
     });
 
-    const sent = await createJiraTicket({ ...stores, fetch: fetchJira }, TODO, "Task");
+    const sent = await createJiraTicket({ ...stores, fetch: fetchJira }, TODO, DRAFT);
 
     expect(sent).toEqual({ action: "jira", label: "QI-1234", url: `${SITE}/browse/QI-1234` });
-    const body = JSON.parse(String(calls[1].init.body)) as { fields: Record<string, unknown> };
+    const body = JSON.parse(String(calls.at(-1)?.init.body)) as { fields: Record<string, unknown> };
     expect(body.fields.project).toEqual({ key: "QI" });
     expect(body.fields.issuetype).toEqual({ name: "Task" });
     expect(body.fields.summary).toBe("Send Dana the keys");
-    expect(body.fields.assignee).toEqual({ accountId: "abc" });
+    expect(body.fields.assignee).toEqual({ accountId: "dana-1" });
+    expect(body.fields.customfield_10206).toEqual({ value: "Platform" });
     const description = JSON.stringify(body.fields.description);
     expect(description).toContain('"type":"bulletList"');
     expect(description).toContain('{"type":"link","attrs":{"href":"https://x.y"}}');
     expect(description).toContain("From the call \\\"Weekly sync\\\"");
+  });
+
+  it("should refuse a team Jira doesn't offer, and leave an unassigned ticket with no assignee", async () => {
+    const stores = fakeStores();
+    stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
+    stores.rawSecrets.set(JIRA_KEYS.token, "t");
+    const { fetchJira, calls } = fakeFetch({ ...TEAM_META, "POST /rest/api/3/issue": { status: 201, body: { key: "QI-9" } } });
+
+    await expect(createJiraTicket({ ...stores, fetch: fetchJira }, TODO, { ...DRAFT, team: "Wizards" })).rejects.toThrow(/no "Wizards"/);
+    expect(calls.some((call) => call.init.method === "POST")).toBe(false);
+    await createJiraTicket({ ...stores, fetch: fetchJira }, TODO, { ...DRAFT, assignee: null, team: null });
+    const body = JSON.parse(String(calls.at(-1)?.init.body)) as { fields: Record<string, unknown> };
+    expect(body.fields).not.toHaveProperty("assignee");
+    expect(body.fields).not.toHaveProperty("customfield_10206");
   });
 
   it("should pass on Jira's own words when it refuses a ticket", async () => {
@@ -215,11 +252,23 @@ describe("jira", () => {
     stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
     stores.rawSecrets.set(JIRA_KEYS.token, "t");
     const { fetchJira } = fakeFetch({
-      "GET /rest/api/3/myself": { body: {} },
       "POST /rest/api/3/issue": { status: 400, body: { errors: { components: "Component is required." } } },
     });
 
-    await expect(createJiraTicket({ ...stores, fetch: fetchJira }, TODO, "Task")).rejects.toThrow("Jira said: components: Component is required.");
+    await expect(createJiraTicket({ ...stores, fetch: fetchJira }, TODO, { ...DRAFT, team: null })).rejects.toThrow("Jira said: components: Component is required.");
+  });
+});
+
+describe("assertJiraDraft", () => {
+  it("should tidy the summary and refuse a type, summary, assignee or description that can't be sent", () => {
+    const types = ["Task", "Bug"];
+    expect(assertJiraDraft({ ...DRAFT, summary: "  Send\nDana  the keys " }, types).summary).toBe("Send Dana the keys");
+    expect(() => assertJiraDraft({ ...DRAFT, issueType: "Epic" }, types)).toThrow(/type of ticket/);
+    expect(() => assertJiraDraft({ ...DRAFT, summary: " " }, types)).toThrow(/summary/);
+    expect(() => assertJiraDraft({ ...DRAFT, summary: "x".repeat(256) }, types)).toThrow(/summary/);
+    expect(() => assertJiraDraft({ ...DRAFT, description: "x".repeat(30_001) }, types)).toThrow(/description/);
+    expect(() => assertJiraDraft({ ...DRAFT, assignee: { accountId: "../x", displayName: "Dana" } }, types)).toThrow(/assign/);
+    expect(() => assertJiraDraft(null, types)).toThrow(/Not a Jira ticket/);
   });
 });
 
