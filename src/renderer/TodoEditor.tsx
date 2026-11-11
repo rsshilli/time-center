@@ -26,7 +26,8 @@ interface TodoEditorProps {
 /**
  * One item's text, formatted as you type and saved as Markdown: **bold**, _italics_, `code`, lists and links.
  * Select words and press ⌘K (or the link button) to link them; pasting an address over selected words does
- * the same. With the cursor in a link, a bar under the item opens, changes or removes it.
+ * the same. Clicking a link opens it in the browser; with the cursor in a link (click beside it and use the arrow
+ * keys), a bar under the item opens, changes or removes it.
  */
 export function TodoEditor({ markdown, editable, placeholder, onSave, onSubmit, editorRef }: TodoEditorProps) {
   const [linkUrl, setLinkUrl] = useState<string | null>(null);
@@ -46,7 +47,8 @@ export function TodoEditor({ markdown, editable, placeholder, onSave, onSubmit, 
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
         link: {
-          openOnClick: !editable,
+          // A click on a link opens it in the browser (the window hands web links on); click beside it to edit it.
+          openOnClick: true,
           autolink: true,
           linkOnPaste: true,
           defaultProtocol: "https",
