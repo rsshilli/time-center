@@ -282,6 +282,16 @@ export interface CallQuestion {
   /** Null when asking failed. */
   answer: string | null;
   error: string | null;
+  /** The TODOs Sonnet found in the calls while answering, each with the call and moment it came from. */
+  todos: CallQuestionTodo[];
+}
+
+/** A TODO Sonnet found while answering a question, ready to add to your list. */
+export interface CallQuestionTodo {
+  text: string;
+  recordingId: number;
+  /** When it was said, to the minute, or the call's start when Sonnet didn't say. */
+  saidAt: number;
 }
 
 /** Everything the dashboard shows for one day. */

@@ -12,3 +12,4 @@ spike/**/recordings/
 .agent-errors.jsonl
 .claude/settings.local.json
 .playwright-mcp/
+supplemental-materials/

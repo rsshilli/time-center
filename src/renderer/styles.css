@@ -732,6 +732,10 @@ button.link.total-name {
   line-height: 1.45;
 }
 
+.ask-todos {
+  margin-top: 10px !important;
+}
+
 /* Recorded calls */
 
 .recordings {

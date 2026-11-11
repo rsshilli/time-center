@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
-import type { CallQuestion, CallQuestionScope, CallRecording } from "../shared/ipc";
+import type { CallQuestion, CallQuestionScope, CallQuestionTodo, CallRecording } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
 import { startOfDay } from "./day";
 import { DictationButton } from "./DictationButton";
 import { formatClock, formatDay } from "./format";
+import { escapeMarkdown } from "./todoOrder";
 
 /** How often the call picker re-reads the day's calls. */
 const CALLS_REFRESH_MS = 15_000;
@@ -294,6 +295,7 @@ function QuestionItem({ item }: { item: CallQuestion }) {
       </p>
       {item.note && <p className="ask-meta">{item.note}</p>}
       {item.answer !== null && <p className="ask-answer">{item.answer}</p>}
+      {item.todos.length > 0 && <FoundTodos item={item} />}
       {item.error !== null && <p className="error">Couldn't get an answer: {item.error}</p>}
     </li>
   );
@@ -307,4 +309,59 @@ function QuestionItem({ item }: { item: CallQuestion }) {
 function sourceText(source: CallQuestion["sources"][number]): string {
   const day = new Date(source.start).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
   return `${source.title ?? "Call"}, ${day} ${formatClock(source.start)}`;
+}
+
+/**
+ * The TODOs Sonnet found while answering, each with an Add to TODOs button that links it to the call it came from.
+ * @param props.item The saved question.
+ */
+function FoundTodos({ item }: { item: CallQuestion }) {
+  const [added, setAdded] = useState<Set<number>>(new Set());
+  const [problem, setProblem] = useState<string | null>(null);
+
+  /**
+   * Adds a found TODO to the list, in Work.
+   * @param todo The TODO.
+   * @param index Its place in the list.
+   */
+  const addToTodos = async (todo: CallQuestionTodo, index: number) => {
+    // Marked straight away, so a double-click adds it once.
+    setAdded((current) => new Set(current).add(index));
+    const source = item.sources.find((each) => each.recordingId === todo.recordingId);
+    try {
+      await window.timeCenter.addTodo({
+        markdown: escapeMarkdown(todo.text),
+        section: "work",
+        source: { recordingId: todo.recordingId, title: source?.title ?? "Call", saidAt: todo.saidAt },
+      });
+      setProblem(null);
+    } catch (error) {
+      setAdded((current) => {
+        const next = new Set(current);
+        next.delete(index);
+        return next;
+      });
+      setProblem(readableError(error));
+    }
+  };
+
+  return (
+    <>
+      <ul className="action-items ask-todos">
+        {item.todos.map((todo, index) => (
+          <li key={index}>
+            <span className="action-text">{todo.text}</span>
+            <span className="action-time">
+              {item.sources.length > 1 && `${item.sources.find((each) => each.recordingId === todo.recordingId)?.title ?? "Call"}, `}
+              {formatClock(todo.saidAt)}
+            </span>
+            <button type="button" className="secondary action-add" disabled={added.has(index)} onClick={() => void addToTodos(todo, index)}>
+              {added.has(index) ? "Added ✓" : "Add to TODOs"}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {problem && <p className="error">{problem}</p>}
+    </>
+  );
 }

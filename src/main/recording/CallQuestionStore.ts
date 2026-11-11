@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { CallQuestion, CallQuestionScope, CallQuestionSource } from "../../shared/ipc";
+import type { CallQuestion, CallQuestionScope, CallQuestionSource, CallQuestionTodo } from "../../shared/ipc";
 
 /** A question to save: everything but its id. */
 export type NewCallQuestion = Omit<CallQuestion, "id">;
@@ -17,7 +17,7 @@ export class CallQuestionStore {
   insertQuestion(question: NewCallQuestion): CallQuestion {
     const result = this.db
       .prepare(
-        "INSERT INTO recording_questions (asked_at, question, scope, sources, note, answer, error) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO recording_questions (asked_at, question, scope, sources, note, answer, error, todos) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         new Date(question.askedAt).toISOString(),
@@ -27,6 +27,7 @@ export class CallQuestionStore {
         question.note,
         question.answer,
         question.error,
+        JSON.stringify(question.todos),
       );
     return { id: Number(result.lastInsertRowid), ...question };
   }
@@ -45,23 +46,24 @@ export class CallQuestionStore {
       askedAt: Date.parse(String(row.asked_at)),
       question: String(row.question),
       scope: String(row.scope) as CallQuestionScope,
-      sources: parseSources(String(row.sources)),
+      sources: parseList<CallQuestionSource>(String(row.sources)),
       note: row.note === null ? null : String(row.note),
       answer: row.answer === null ? null : String(row.answer),
       error: row.error === null ? null : String(row.error),
+      todos: parseList<CallQuestionTodo>(String(row.todos)),
     }));
   }
 }
 
 /**
- * Reads a saved sources list, treating a damaged one as empty rather than hiding the whole history.
+ * Reads a saved JSON list, treating a damaged one as empty rather than hiding the whole history.
  * @param json The column's text.
- * @returns The sources.
+ * @returns The list.
  */
-function parseSources(json: string): CallQuestionSource[] {
+function parseList<T>(json: string): T[] {
   try {
     const value: unknown = JSON.parse(json);
-    return Array.isArray(value) ? (value as CallQuestionSource[]) : [];
+    return Array.isArray(value) ? (value as T[]) : [];
   } catch {
     return [];
   }

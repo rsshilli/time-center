@@ -269,4 +269,8 @@ export const MIGRATIONS: readonly string[] = [
    WHERE voice_id IN (SELECT id FROM voices WHERE name = 'You');
   UPDATE recordings SET your_voice_learned_at = NULL;
   `,
+  `
+  -- The TODOs Sonnet found while answering a question, as JSON: [{text, recordingId, saidAt}].
+  ALTER TABLE recording_questions ADD COLUMN todos TEXT NOT NULL DEFAULT '[]';
+  `,
 ];

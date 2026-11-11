@@ -175,6 +175,7 @@ describe("isAbout", () => {
       note: null,
       answer: "That.",
       error: null,
+      todos: [],
     });
     expect(isAbout(question("call", [4]), 4)).toBe(true);
     expect(isAbout(question("call", [5]), 4)).toBe(false);

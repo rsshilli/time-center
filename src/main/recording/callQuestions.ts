@@ -1,4 +1,11 @@
-import type { CallQuestion, CallQuestionRequest, CallQuestionSource, CallSpeaker, TranscriptLine } from "../../shared/ipc";
+import type {
+  CallQuestion,
+  CallQuestionRequest,
+  CallQuestionSource,
+  CallQuestionTodo,
+  CallSpeaker,
+  TranscriptLine,
+} from "../../shared/ipc";
 import { formatClock, transcriptText } from "../../shared/transcript";
 import { localDayBounds } from "../activity/dayReport";
 import type { HaikuClient } from "../calendar/BedrockHaiku";
@@ -40,7 +47,21 @@ const SYSTEM_PROMPT = [
   "Answer only from the transcripts. If they don't say, say so plainly. When it helps, name which call " +
     "(its meeting and date) a point came from.",
   "Be brief and plain. No Markdown: no headings, no bold; a list may use lines starting with \"- \".",
+  "When your answer names tasks the user should do or follow up on (say they asked about a to-do, a task, an action " +
+    "item or next steps), end with them for their TODO list, after the answer, exactly like this:",
+  "<todos>",
+  '<todo call="1" time="1:32 PM">Send Adrienne the pre-execution CAP with the record compare tests</todo>',
+  "</todos>",
+  'call is the n of the <call> it came from and time is when it was said there. Write each as a short instruction ' +
+    "to the user. Leave the list out when there are none, and don't mention it in the answer. When you give the " +
+    "list, keep the answer to a short lead-in rather than repeating the tasks, since each is shown under it.",
 ].join("\n");
+
+/** The most TODOs taken from one answer. */
+const MAX_FOUND_TODOS = 20;
+
+/** The longest TODO taken from an answer. */
+const MAX_TODO_CHARS = 300;
 
 /** What answering a question needs, injected for tests. */
 export interface CallQuestionDeps {
@@ -91,12 +112,15 @@ export async function askAboutCalls(deps: CallQuestionDeps, request: CallQuestio
   const askedAt = deps.now();
   let answer: string | null = null;
   let error: string | null = null;
+  let todos: CallQuestionTodo[] = [];
   try {
-    answer = readAnswer(await deps.claude.invoke(buildRequest(question, picked.calls, askedAt)));
+    const found = splitTodos(readAnswer(await deps.claude.invoke(buildRequest(question, picked.calls, askedAt))), picked.calls);
+    answer = found.answer;
+    todos = found.todos;
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
   }
-  return deps.questions.insertQuestion({ askedAt, question, scope: request.scope, sources, note: picked.note, answer, error });
+  return deps.questions.insertQuestion({ askedAt, question, scope: request.scope, sources, note: picked.note, answer, error, todos });
 }
 
 /**
@@ -143,11 +167,11 @@ function emptyScopeMessage(deps: CallQuestionDeps, request: CallQuestionRequest)
  */
 export function buildRequest(question: string, calls: PickedCall[], now: number): object {
   const transcripts = calls
-    .map((call) => {
+    .map((call, index) => {
       const end = call.recording.end === null ? "still going" : formatClock(call.recording.end);
       const meeting = call.title === null ? "" : ` meeting="${call.title.replace(/"/g, "'")}"`;
       return (
-        `<call date="${longDate(call.recording.start)}" time="${formatClock(call.recording.start)} to ${end}"${meeting}>\n` +
+        `<call n="${index + 1}" date="${longDate(call.recording.start)}" time="${formatClock(call.recording.start)} to ${end}"${meeting}>\n` +
         `${transcriptText(call.lines, call.speakers)}\n</call>`
       );
     })
@@ -183,6 +207,84 @@ export function readAnswer(reply: unknown): string {
     throw new Error("Sonnet sent back an empty answer.");
   }
   return text;
+}
+
+/**
+ * Takes the <todos> list Sonnet ends an answer with off the answer, and reads each TODO's call and moment. One
+ * naming a call that wasn't sent, or with no text, is dropped; a list cut off by the answer's size limit keeps
+ * the TODOs that were finished.
+ * @param text The answer as Sonnet wrote it.
+ * @param calls The calls sent, in the order they were numbered.
+ * @returns The answer without the list, and the TODOs.
+ */
+export function splitTodos(text: string, calls: readonly Pick<PickedCall, "recording">[]): { answer: string; todos: CallQuestionTodo[] } {
+  const start = text.search(/<todos>/i);
+  if (start === -1) {
+    return { answer: text, todos: [] };
+  }
+  const block = text.slice(start);
+  const rest = block.replace(/^<todos>[\s\S]*?(<\/todos>|$)/i, "");
+  const answer = `${text.slice(0, start)}${rest}`.trim() || "Here's what I found.";
+  const todos: CallQuestionTodo[] = [];
+  for (const match of block.matchAll(/<todo\b([^>]*)>([\s\S]*?)<\/todo>/gi)) {
+    const number = /\bcall="(\d+)"/.exec(match[1])?.[1];
+    // With one call sent, a TODO whose call number is missing can only be from that call.
+    const call = number === undefined && calls.length === 1 ? calls[0] : calls[Number(number ?? 0) - 1];
+    const todoText = decodeEntities(match[2]).replace(/\s+/g, " ").trim().slice(0, MAX_TODO_CHARS);
+    if (call && todoText !== "" && todos.length < MAX_FOUND_TODOS) {
+      const time = /\btime="([^"]*)"/.exec(match[1])?.[1] ?? "";
+      todos.push({ text: todoText, recordingId: call.recording.id, saidAt: clockInCall(time, call.recording) });
+    }
+  }
+  return { answer, todos };
+}
+
+/**
+ * Turns the few escapes Sonnet may write in XML-like text (&amp; &lt; &gt; &quot; &#39;) back into characters.
+ * @param text The text.
+ * @returns The text with them decoded.
+ */
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Turns a time of day from a transcript ("1:32 PM", or "13:32") into a moment in a call: the first one at or
+ * after the call started, so a call running past midnight still works. The time comes from Sonnet, so one
+ * outside the call (a time someone mentioned, say) falls back to the call's start.
+ * @param time The time of day.
+ * @param call When the call started and ended (null while recording).
+ * @returns The moment, or the call's start when the time can't be read or isn't in the call.
+ */
+export function clockInCall(time: string, call: { start: number; end: number | null }): number {
+  const callStart = call.start;
+  const match = /^\s*(\d{1,2}):(\d{2})(?:\s*([AaPp])\.?[Mm]\.?)?\s*$/.exec(time);
+  if (!match) {
+    return callStart;
+  }
+  const minutes = Number(match[2]);
+  let hours = Number(match[1]);
+  if (match[3]) {
+    hours = (hours % 12) + (match[3].toLowerCase() === "p" ? 12 : 0);
+  }
+  if (hours > 23 || minutes > 59) {
+    return callStart;
+  }
+  const moment = new Date(callStart);
+  moment.setHours(hours, minutes, 0, 0);
+  // Said within the call's first minute reads as before it started, since the clock drops the seconds.
+  if (moment.getTime() < callStart - 60_000) {
+    moment.setDate(moment.getDate() + 1);
+  }
+  if (call.end !== null && moment.getTime() > call.end + 60_000) {
+    return callStart;
+  }
+  return moment.getTime();
 }
 
 /**
