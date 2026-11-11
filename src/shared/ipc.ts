@@ -394,6 +394,12 @@ export interface TodoSource {
   saidAt: number;
 }
 
+/**
+ * Opens Cowork in Claude Desktop, with your tasks listed down the side. Claude Desktop doesn't say which task a
+ * hand-off became, so a TODO sent to Cowork links here rather than to its own task.
+ */
+export const COWORK_URL = "claude://cowork/new";
+
 /** A place a TODO was sent, such as the Jira ticket made from it. */
 export interface TodoSent {
   /** The action that sent it, e.g. "jira". */

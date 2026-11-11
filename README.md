@@ -155,6 +155,8 @@ shows under the item as a link.
 ### Handing a TODO to Claude
 
 A TODO's ⋯ → **Start a Claude Cowork task** opens a new Cowork task in Claude Desktop with the item filled in.
+The item then shows a **Claude Cowork ↗** link back to Cowork, where the task is in the list down the side
+(Claude Desktop doesn't say which task it became, so the link can't open that one task directly).
 **Send to QbDCode…** opens a popup with the instructions (the item, its call, and what was said around then),
 ready to edit, and a list of your qbdvision worktrees; **Send** starts a QbDCode chat in the one you pick.
 

@@ -1,6 +1,15 @@
 import type { Editor } from "@tiptap/react";
 import { type DragEvent, useEffect, useRef, useState } from "react";
-import { TODO_SECTIONS, type Todo, type TodoActionInfo, type TodoDialog, type TodoLayout, type TodoSection } from "../shared/ipc";
+import {
+  COWORK_URL,
+  TODO_SECTIONS,
+  type Todo,
+  type TodoActionInfo,
+  type TodoDialog,
+  type TodoLayout,
+  type TodoSection,
+  type TodoSent,
+} from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
 import { JiraDialog } from "./JiraDialog";
 import { QbdcodeDialog } from "./QbdcodeDialog";
@@ -382,17 +391,25 @@ function TodoRow({ todo, actions, update, onOpenCall, drag, showSection }: RowPr
                 From {todo.source.title} · {new Date(todo.source.saidAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
               </button>
             )}
-            {todo.sent.map((sent) =>
-              sent.url ? (
-                <a key={`${sent.action}-${sent.at}`} className="todo-sent" href={sent.url} target="_blank" rel="noopener noreferrer">
+            {todo.sent.map((sent) => {
+              const url = sentUrl(sent);
+              return url ? (
+                <a
+                  key={`${sent.action}-${sent.at}`}
+                  className="todo-sent"
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={sent.action === "cowork" ? "Open Cowork in Claude Desktop; the task is in the list down the side" : undefined}
+                >
                   {sent.label} ↗
                 </a>
               ) : (
                 <span key={`${sent.action}-${sent.at}`} className="todo-sent">
                   {sent.label}
                 </span>
-              ),
-            )}
+              );
+            })}
             {running && <span className="muted">{running}…</span>}
             {problem && <span className="error">{problem}</span>}
           </div>
@@ -420,4 +437,13 @@ function TodoRow({ todo, actions, update, onOpenCall, drag, showSection }: RowPr
       {dialog === "qbdcode" && <QbdcodeDialog todo={todo} onClose={() => setDialog(null)} onSent={(list) => void update(async () => list)} />}
     </li>
   );
+}
+
+/**
+ * Where a "sent to" tag under an item links. Items sent to Cowork before it had a link get the Cowork one too.
+ * @param sent Where the item was sent.
+ * @returns The link, or null for a plain tag.
+ */
+function sentUrl(sent: TodoSent): string | null {
+  return sent.url ?? (sent.action === "cowork" ? COWORK_URL : null);
 }

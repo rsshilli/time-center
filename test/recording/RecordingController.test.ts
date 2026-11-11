@@ -8,6 +8,8 @@ import type { AudioChunk, RecorderEvents } from "../../src/main/recording/record
 function setUp() {
   const log: string[] = [];
   const clock = { now: 1_000_000 };
+  /** Your own calendar block runs until this time. */
+  const solo = { until: 0 };
   const recorders: { folder: string; events: RecorderEvents; stopped: boolean }[] = [];
   let nextId = 1;
   const controller = new RecordingController({
@@ -28,6 +30,7 @@ function setUp() {
     onFinished: (id) => log.push(`finished ${id}`),
     recordingsDir: "/data/recordings",
     onChange: () => log.push("changed"),
+    isSoloTime: (now) => now < solo.until,
     now: () => clock.now,
   });
   /**
@@ -41,10 +44,20 @@ function setUp() {
       clock.now += 3_000;
     }
   };
-  return { controller, log, clock, recorders, samples };
+  return { controller, log, clock, recorders, samples, solo };
 }
 
 describe("RecordingController", () => {
+  it("should not record during time blocked out for just you, and start once that block is over", () => {
+    const { controller, clock, recorders, samples, solo } = setUp();
+    solo.until = clock.now + 60_000;
+    samples(true, 57_000);
+    expect(recorders).toHaveLength(0);
+    samples(true, 6_000);
+    expect(recorders).toHaveLength(1);
+    expect(controller.isRecording()).toBe(true);
+  });
+
   it("should start recording once a call has lasted a few seconds, not on a single blip", () => {
     const { controller, recorders, samples } = setUp();
     samples(true, 3_000);

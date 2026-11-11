@@ -195,7 +195,7 @@ describe("handoff", () => {
       expect(url.host).toBe("cowork");
       expect(url.pathname).toBe("/new");
       expect(url.searchParams.get("q")).toBe(handoffText(todo(), deps));
-      expect(sent).toEqual({ action: "cowork", label: "Claude Cowork", url: null });
+      expect(sent).toEqual({ action: "cowork", label: "Claude Cowork", url: "claude://cowork/new" });
     });
 
     it("should cut the text to what Claude Desktop keeps", async () => {

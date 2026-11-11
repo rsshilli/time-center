@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BrowserWindow, shell } from "electron";
+import { COWORK_URL } from "../shared/ipc";
 
 /** The screens the single app window can show. */
 export type Screen = "dashboard" | "recordings" | "todos" | "permissions" | "settings";
@@ -97,7 +98,8 @@ function openIfExternal(url: string): void {
  */
 export function isExternalLink(url: string): boolean {
   try {
-    return ["http:", "https:", "mailto:"].includes(new URL(url).protocol) && !isAppPage(url);
+    // Of the custom schemes, only the one Cowork link a TODO shows; any other claude:// link could start something.
+    return url === COWORK_URL || (["http:", "https:", "mailto:"].includes(new URL(url).protocol) && !isAppPage(url));
   } catch {
     return false;
   }

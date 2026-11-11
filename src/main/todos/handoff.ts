@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import type { CallSpeaker, QbdcodeHandoff, Todo, TodoSent, TranscriptLine } from "../../shared/ipc";
+import { COWORK_URL, type CallSpeaker, type QbdcodeHandoff, type Todo, type TodoSent, type TranscriptLine } from "../../shared/ipc";
 import { formatClock, groupTurns, speakerLabel, type Turn } from "../../shared/transcript";
 import type { TodoAction } from "./todoIpc";
 
@@ -132,7 +132,7 @@ export async function sendToQbdcode(deps: HandoffDependencies, path: unknown, te
 export async function startCowork(deps: HandoffDependencies, todo: Todo): Promise<Omit<TodoSent, "at">> {
   const text = cutText(handoffText(todo, deps), MAX_COWORK_CHARS);
   await deps.openExternal(`claude://cowork/new?q=${encodeURIComponent(text)}`);
-  return { action: "cowork", label: "Claude Cowork", url: null };
+  return { action: "cowork", label: "Claude Cowork", url: COWORK_URL };
 }
 
 /**

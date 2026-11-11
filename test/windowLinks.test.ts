@@ -13,6 +13,12 @@ describe("isExternalLink", () => {
     expect(isExternalLink("time-center-shot://shot/1/full")).toBe(false);
     expect(isExternalLink("not a url")).toBe(false);
   });
+
+  it("should open Cowork's own link in Claude Desktop, but no other claude:// link", () => {
+    expect(isExternalLink("claude://cowork/new")).toBe(true);
+    expect(isExternalLink("claude://cowork/new?q=delete%20everything")).toBe(false);
+    expect(isExternalLink("claude://code/new")).toBe(false);
+  });
 });
 
 describe("isAppPage", () => {

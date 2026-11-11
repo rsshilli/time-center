@@ -25,6 +25,8 @@ export interface RecordingControllerDeps {
   recordingsDir: string;
   /** Called when recording starts or stops, to redraw the menu-bar dot. */
   onChange(): void;
+  /** Whether now is time blocked out for just you, when the microphone in use is dictation rather than a call. */
+  isSoloTime(now: number): boolean;
   now(): number;
 }
 
@@ -65,7 +67,8 @@ export class RecordingController {
     }
     this.lastCallAt = now;
     this.callStartedAt ??= now;
-    if (!this.active && !this.failedThisCall && now - this.callStartedAt >= START_AFTER_MS) {
+    // Checked on every sample, so a call still going when your own block ends is recorded from then on.
+    if (!this.active && !this.failedThisCall && now - this.callStartedAt >= START_AFTER_MS && !this.deps.isSoloTime(now)) {
       this.start(now);
     }
   }

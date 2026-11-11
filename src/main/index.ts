@@ -41,7 +41,7 @@ import {
   nameRecordingAudio,
   recoverRecordings,
 } from "./recording/recordingFiles";
-import { bestMeeting } from "./recording/callMeeting";
+import { bestMeeting, isSoloTime } from "./recording/callMeeting";
 import { registerRecordingIpc } from "./recording/recordingIpc";
 import { RecordingStore, type StoredRecording } from "./recording/RecordingStore";
 import { Transcriber, type TranscriberDeps } from "./recording/Transcriber";
@@ -161,6 +161,7 @@ async function main(): Promise<void> {
     },
     recordingsDir,
     onChange: () => tray.refresh(),
+    isSoloTime: (now) => isSoloTime(calendar.store.listEvents(now, now + 1), now),
     now: () => Date.now(),
   });
   const tracker = createTracker(activity, ignoredApps, (onCall) => recorder.callSample(onCall));
