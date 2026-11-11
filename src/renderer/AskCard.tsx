@@ -25,6 +25,11 @@ export function AskCard({ at }: { at: number }) {
   const [history, setHistory] = useState<CallQuestion[]>([]);
   const [asking, setAsking] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Questions asked since the day was picked stay listed even when their calls were on other days.
+  const [justAsked, setJustAsked] = useState<number[]>([]);
+  const dayStart = startOfDay(at);
+
+  useEffect(() => setJustAsked([]), [dayStart]);
 
   useEffect(() => {
     void window.timeCenter
@@ -72,6 +77,7 @@ export function AskCard({ at }: { at: number }) {
         recordingId: scope === "call" ? recordingId : null,
       });
       setHistory((past) => [saved, ...past]);
+      setJustAsked((ids) => [...ids, saved.id]);
       if (saved.answer !== null) {
         setQuestion("");
       }
@@ -81,6 +87,8 @@ export function AskCard({ at }: { at: number }) {
       setAsking(false);
     }
   };
+
+  const shown = history.filter((item) => justAsked.includes(item.id) || isOnDay(item, dayStart));
 
   return (
     <div className="card ask">
@@ -129,15 +137,30 @@ export function AskCard({ at }: { at: number }) {
       {scope === "all" && <p className="muted">Searches your calls for the question's words and sends the best matches.</p>}
       {asking && <p className="muted">Sonnet is reading the transcripts…</p>}
       {problem && <p className="error">{problem}</p>}
-      {history.length > 0 && (
+      {history.length > 0 && shown.length === 0 && <p className="muted">No questions about this day's calls yet.</p>}
+      {shown.length > 0 && (
         <ul className="ask-history">
-          {history.map((item) => (
+          {shown.map((item) => (
             <QuestionItem key={item.id} item={item} />
           ))}
         </ul>
       )}
     </div>
   );
+}
+
+/**
+ * Whether a saved question belongs on a day's Recordings tab: one of the calls it read started that day, or,
+ * when it read none (it failed first), it was asked that day.
+ * @param item The question.
+ * @param dayStart Local midnight that starts the day.
+ * @returns True when it does.
+ */
+export function isOnDay(item: CallQuestion, dayStart: number): boolean {
+  if (item.sources.length === 0) {
+    return startOfDay(item.askedAt) === dayStart;
+  }
+  return item.sources.some((source) => startOfDay(source.start) === dayStart);
 }
 
 /**

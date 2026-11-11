@@ -1,6 +1,6 @@
 import type { CallQuestion, CallRecording, TranscriptLine } from "../../src/shared/ipc";
 import { dropEchoes, groupTurns, transcriptText, yourOwnLines } from "../../src/shared/transcript";
-import { isAbout } from "../../src/renderer/AskCard";
+import { isAbout, isOnDay } from "../../src/renderer/AskCard";
 import { typeList } from "../../src/renderer/JiraSettings";
 import { stateText, todoCount } from "../../src/renderer/RecordingsCard";
 
@@ -180,5 +180,45 @@ describe("isAbout", () => {
     expect(isAbout(question("call", [4]), 4)).toBe(true);
     expect(isAbout(question("call", [5]), 4)).toBe(false);
     expect(isAbout(question("day", [4]), 4)).toBe(false);
+  });
+});
+
+describe("isOnDay", () => {
+  const MONDAY = new Date(2026, 10, 9).getTime();
+  const TUESDAY = new Date(2026, 10, 10).getTime();
+
+  /**
+   * A saved question that read calls starting at the given moments.
+   * @param askedAt When it was asked.
+   * @param starts Each call's start.
+   * @returns The question.
+   */
+  const question = (askedAt: number, starts: number[]): CallQuestion => ({
+    id: 1,
+    askedAt,
+    question: "What?",
+    scope: "all",
+    sources: starts.map((start, index) => ({ recordingId: index + 1, start, title: null })),
+    note: null,
+    answer: "That.",
+    error: null,
+    todos: [],
+  });
+
+  it("should keep a question on the day of its calls, not the day it was asked", () => {
+    const askedTuesdayAboutMonday = question(TUESDAY + 9 * 3_600_000, [MONDAY + 14 * 3_600_000]);
+    expect(isOnDay(askedTuesdayAboutMonday, MONDAY)).toBe(true);
+    expect(isOnDay(askedTuesdayAboutMonday, TUESDAY)).toBe(false);
+  });
+
+  it("should show a question on every day one of its calls was on", () => {
+    const both = question(TUESDAY, [MONDAY + 3_600_000, TUESDAY + 3_600_000]);
+    expect(isOnDay(both, MONDAY)).toBe(true);
+    expect(isOnDay(both, TUESDAY)).toBe(true);
+  });
+
+  it("should fall back to the day asked when it read no calls", () => {
+    expect(isOnDay(question(TUESDAY + 60_000, []), TUESDAY)).toBe(true);
+    expect(isOnDay(question(TUESDAY + 60_000, []), MONDAY)).toBe(false);
   });
 });

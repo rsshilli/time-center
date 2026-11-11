@@ -70,8 +70,8 @@ import { TodoStore } from "./todos/TodoStore";
 import { TrayController } from "./TrayController";
 import { WindowManager, type Screen } from "./WindowManager";
 
-/** How many past questions about calls the Recordings tab shows. */
-const QUESTIONS_SHOWN = 30;
+/** How many past questions about calls the Recordings tab loads; it shows the picked day's, so older days need many. */
+const QUESTIONS_SHOWN = 500;
 
 /** The setting that keeps Chrome's last Automation answer, shown while Chrome is closed. */
 const CHROME_AUTOMATION_SETTING = "permissions.chromeAutomation";
