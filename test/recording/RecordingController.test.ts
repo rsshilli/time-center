@@ -1,4 +1,12 @@
-import { appFamily, RecordingController, START_AFTER_MS, STOP_AFTER_MS, SWITCH_AFTER_MS } from "../../src/main/recording/RecordingController";
+import {
+  appFamily,
+  EXIT_WAIT_MS,
+  RecordingController,
+  RETRY_AFTER_MS,
+  START_AFTER_MS,
+  STOP_AFTER_MS,
+  SWITCH_AFTER_MS,
+} from "../../src/main/recording/RecordingController";
 import type { AudioChunk, RecorderEvents } from "../../src/main/recording/recorderProcess";
 
 /**
@@ -54,17 +62,44 @@ describe("RecordingController", () => {
     // Zoom still holds the microphone for a moment after you join Meet in Chrome.
     samples(true, 6_000, ["Google Chrome Helper", "us.zoom.xos"]);
     samples(true, SWITCH_AFTER_MS, ["Google Chrome Helper"]);
-    expect(recorders).toHaveLength(2);
-    expect(recorders[0].stopped).toBe(true);
-    expect(controller.isRecording()).toBe(true);
     // Chrome came on at 1,060,000; the first 3-second sample at least SWITCH_AFTER_MS later splits the call.
     const switchedAt = 1_060_000 + Math.ceil(SWITCH_AFTER_MS / 3_000) * 3_000;
     expect(log).toContain(`finish 1 ${switchedAt}`);
-    expect(log.filter((line) => line.startsWith("insert")).map((line) => Number(line.split(" ")[1]))).toEqual([1_006_000, switchedAt]);
+    expect(recorders[0].stopped).toBe(true);
+    // The new recorder waits for the old one to exit, so the two never capture at once.
+    expect(recorders).toHaveLength(1);
+    recorders[0].events.onExit(null);
+    const restartAt = clock.now;
+    samples(true, 3_000, ["Google Chrome Helper"]);
+    expect(recorders).toHaveLength(2);
+    expect(controller.isRecording()).toBe(true);
+    expect(log.filter((line) => line.startsWith("insert")).map((line) => Number(line.split(" ")[1]))).toEqual([1_006_000, restartAt]);
     // Back to Zoom for the next meeting: a third recording.
     samples(true, SWITCH_AFTER_MS + 3_000, ["us.zoom.xos"]);
+    recorders[1].events.onExit(null);
+    samples(true, 3_000, ["us.zoom.xos"]);
     expect(recorders).toHaveLength(3);
-    expect(clock.now).toBeGreaterThan(switchedAt);
+  });
+
+  it("should start the next recorder anyway when the last one hasn't exited after a while", () => {
+    const { recorders, samples } = setUp();
+    samples(true, 30_000, ["us.zoom.xos"]);
+    samples(true, SWITCH_AFTER_MS + 3_000, ["Google Chrome Helper"]);
+    expect(recorders).toHaveLength(1);
+    samples(true, EXIT_WAIT_MS, ["Google Chrome Helper"]);
+    expect(recorders).toHaveLength(2);
+  });
+
+  it("should try a recorder that stopped by itself again a minute later, while the call goes on", () => {
+    const { controller, log, recorders, samples } = setUp();
+    samples(true, 9_000, ["Google Chrome Helper"]);
+    recorders[0].events.onExit("Recording stopped: Failed during stream due to application connection being interrupted");
+    expect(log.some((line) => line.startsWith("finish 1") && line.includes("interrupted"))).toBe(true);
+    samples(true, RETRY_AFTER_MS - 3_000, ["Google Chrome Helper"]);
+    expect(recorders).toHaveLength(1);
+    samples(true, 6_000, ["Google Chrome Helper"]);
+    expect(recorders).toHaveLength(2);
+    expect(controller.isRecording()).toBe(true);
   });
 
   it("should keep one recording when another app holds the microphone only briefly, or it's the same app's helper", () => {
@@ -149,7 +184,7 @@ describe("RecordingController", () => {
     expect(log).toContain("no mic 1");
   });
 
-  it("should not restart a recorder that failed until the call is over", () => {
+  it("should not restart a recorder missing its permission until the call is over", () => {
     const { controller, log, recorders, samples } = setUp();
     samples(true, 9_000);
     recorders[0].events.onExit("macOS hasn't allowed Time Center to record");

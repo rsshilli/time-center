@@ -18,6 +18,21 @@ export const STOP_AFTER_MS = 30_000;
  */
 export const SWITCH_AFTER_MS = 20_000;
 
+/**
+ * After the recorder stops by itself mid-call, try again this long later. On 11/13 the recorder started for a
+ * Meet call died after 4 s ("application connection being interrupted") and the call ran on unrecorded for 90 min.
+ */
+export const RETRY_AFTER_MS = 60_000;
+
+/**
+ * How long to wait for the last recorder to exit before starting the next one anyway, should it hang. Two
+ * recorders capturing at once is the suspected (not proven) cause of the 11/13 failure above.
+ */
+export const EXIT_WAIT_MS = 10_000;
+
+/** How the recorder's missing-permission failure begins (native/MeetingRecorder.swift); retrying can't help it. */
+const NO_PERMISSION = "macOS hasn't allowed";
+
 /** What the controller needs, injected for tests. */
 export interface RecordingControllerDeps {
   store: Pick<RecordingStore, "insertRecording" | "markNoMic" | "finishRecording">;
@@ -47,15 +62,18 @@ interface ActiveRecording {
 /**
  * Records any call: starts the recorder once some app has been using the microphone for a few seconds (the
  * front-window helper's onCall, every 3 s), and stops it once the call has been over for half a minute.
- * A recorder that fails isn't restarted until that call ends, so a missing permission can't make it spin.
+ * A recorder that fails is tried again a minute later, or, missing a permission, not until that call ends, so it
+ * can't spin. A new recorder waits for the last one to exit.
  */
 export class RecordingController {
   private active: ActiveRecording | null = null;
   /** When the current run of "on a call" samples began, or null between calls. */
   private callStartedAt: number | null = null;
   private lastCallAt = Number.NEGATIVE_INFINITY;
-  /** The recorder failed during this call; wait for the call to end before trying again. */
-  private failedThisCall = false;
+  /** After the recorder failed during this call, don't start another before this time (Infinity: not this call). */
+  private retryAt = Number.NEGATIVE_INFINITY;
+  /** The recorder asked to stop that hasn't exited yet, and when it was asked, or null. */
+  private exiting: { id: number; since: number } | null = null;
   /** When an app not on the recording's call started using the microphone, or null when none has. */
   private newAppSince: number | null = null;
 
@@ -84,9 +102,21 @@ export class RecordingController {
       this.finish(now);
     }
     // Checked on every sample, so a call still going when your own block ends is recorded from then on.
-    if (!this.active && !this.failedThisCall && now - this.callStartedAt >= START_AFTER_MS && !this.deps.isSoloTime(now)) {
+    if (!this.active && this.mayStart(now) && now - this.callStartedAt >= START_AFTER_MS && !this.deps.isSoloTime(now)) {
       this.start(now, callApps);
     }
+  }
+
+  /**
+   * Says whether a recorder may start now: no failure is being waited out, and the last recorder has exited.
+   * @param now The current time.
+   * @returns True when it may.
+   */
+  private mayStart(now: number): boolean {
+    if (now < this.retryAt) {
+      return false;
+    }
+    return this.exiting === null || now - this.exiting.since >= EXIT_WAIT_MS;
   }
 
   /**
@@ -117,7 +147,7 @@ export class RecordingController {
       return;
     }
     this.callStartedAt = null;
-    this.failedThisCall = false;
+    this.retryAt = Number.NEGATIVE_INFINITY;
     if (this.active) {
       // The call ended at the last sample that saw it, not half a minute later when we noticed.
       this.finish(Math.min(now, this.lastCallAt + 3_000));
@@ -139,6 +169,7 @@ export class RecordingController {
     }
     this.callStartedAt = null;
     this.lastCallAt = Number.NEGATIVE_INFINITY;
+    this.retryAt = Number.NEGATIVE_INFINITY;
   }
 
   /**
@@ -162,15 +193,20 @@ export class RecordingController {
       onChunk: (chunk) => this.deps.transcribe(id, chunk),
       /**
        * The recorder exited, its one file mixed. If it stopped by itself (not asked to): close the row, keep the
-       * reason, and hold off until the call ends.
+       * reason, and hold off a minute, or until the call ends when a permission is missing.
        */
       onExit: (error) => {
         this.deps.onFinished(id);
+        if (this.exiting?.id === id) {
+          this.exiting = null;
+        }
         if (this.active?.id !== id) {
           return;
         }
         this.active = null;
-        this.failedThisCall = error !== null;
+        if (error !== null) {
+          this.retryAt = error.startsWith(NO_PERMISSION) ? Number.POSITIVE_INFINITY : this.deps.now() + RETRY_AFTER_MS;
+        }
         this.deps.store.finishRecording(id, this.deps.now(), error);
         this.deps.onChange();
       },
@@ -189,6 +225,7 @@ export class RecordingController {
       return;
     }
     this.active = null;
+    this.exiting = { id: active.id, since: this.deps.now() };
     this.deps.store.finishRecording(active.id, end);
     active.handle.stop();
     this.deps.onChange();

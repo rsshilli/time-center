@@ -60,8 +60,10 @@ export function SprintTickets() {
                 <a href={ticket.url} target="_blank" rel="noopener noreferrer" title={`Open ${ticket.key} in Jira`}>
                   {ticket.key}
                 </a>{" "}
-                <span title={ticket.type}>{ticket.summary}</span>
+                <span>{ticket.summary}</span>
               </span>
+              {/* Its own cell, outside the title, so it isn't copied with the number and summary. */}
+              <span className={`sprint-type ${typeClass(ticket.type)}`}>{ticket.type}</span>
               <StatusPicker ticket={ticket} onMoved={setReport} />
             </li>
           ))}
@@ -69,6 +71,25 @@ export function SprintTickets() {
       )}
     </section>
   );
+}
+
+/**
+ * Picks the colour of a ticket's type pill, after Jira's own: bugs red, stories green, tasks blue.
+ * @param type The type's name in Jira ("Bug", "Story", "Sub-task"…).
+ * @returns The pill's class; other types (Epic…) stay plain.
+ */
+export function typeClass(type: string): string {
+  const name = type.toLowerCase();
+  if (name === "bug") {
+    return "bug";
+  }
+  if (name === "story") {
+    return "story";
+  }
+  if (name === "task" || name === "sub-task" || name === "subtask") {
+    return "task";
+  }
+  return "";
 }
 
 /**

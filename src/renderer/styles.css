@@ -1642,13 +1642,15 @@ button.link.todo-source {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 4px;
+  /* Shared by every row, so the type pills and statuses line up in columns. */
+  grid-template-columns: 1fr auto auto;
+  gap: 4px 10px;
 }
 
 .sprint-ticket {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: baseline;
   padding: 6px 10px;
   border: 1px solid var(--line);
@@ -1672,6 +1674,33 @@ button.link.todo-source {
 
 .sprint-ticket.done {
   opacity: 0.55;
+}
+
+/* The ticket's type, quieter than its status beside it. */
+.sprint-type {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  white-space: nowrap;
+  user-select: none;
+  justify-self: end;
+}
+
+.sprint-type.bug {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+}
+
+.sprint-type.story {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+
+.sprint-type.task {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .sprint-status {
