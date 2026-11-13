@@ -1,6 +1,6 @@
-import { useState, type Ref, type UIEvent } from "react";
+import { Fragment, useState, type Ref, type UIEvent } from "react";
 import type { CallRecording } from "../shared/ipc";
-import { YOUR_VOICE, formatClock, groupTurns, isYou, speakerLabel, type Turn } from "../shared/transcript";
+import { YOUR_VOICE, formatClock, groupTurns, isYou, meetingStartingAt, speakerLabel, type Turn } from "../shared/transcript";
 import { readableError } from "./CalendarSettings";
 
 /** Fired on window after a speaker is named, so the calls are re-read at once rather than at the next poll. */
@@ -120,7 +120,7 @@ function TurnList({
             ? SPEAKER_COLOURS[(speaker.number - 1) % SPEAKER_COLOURS.length]
             : undefined;
         const label = speakerLabel(turn, recording.speakers);
-        return (
+        const item = (
           <li
             key={`${index}:${turn.side}@${turn.start}`}
             className={colour === undefined && speaker ? "turn turn-me" : `turn turn-${turn.side}`}
@@ -168,6 +168,15 @@ function TurnList({
               <SpeakerNamer speaker={speaker} choices={recording.nameChoices} onDone={() => setNaming(null)} />
             )}
           </li>
+        );
+        const meeting = meetingStartingAt(turns, index, recording.meetings);
+        return meeting ? (
+          <Fragment key={`${index}:${turn.side}@${turn.start}`}>
+            <li className="turn-meeting">{meeting.title}</li>
+            {item}
+          </Fragment>
+        ) : (
+          item
         );
       })}
     </ol>

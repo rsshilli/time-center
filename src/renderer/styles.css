@@ -841,6 +841,18 @@ button.link.total-name {
   user-select: text;
 }
 
+/* Where the next meeting starts, in a call that ran through several. */
+.turn-meeting {
+  margin-top: 6px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.turn-meeting:first-child {
+  margin-top: 0;
+}
+
 .turn {
   display: grid;
   grid-template-columns: 70px 96px 1fr;

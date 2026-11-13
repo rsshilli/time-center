@@ -87,6 +87,18 @@ describe("transcriptText", () => {
     expect(transcriptText([line("me", 0, "Hi."), line("them", 61, "Hello.")])).toMatch(/^9:30\sAM You: Hi\.\n9:31\sAM Them: Hello\.$/);
   });
 
+  it("should head each meeting's part of a call that ran through several, and leave a one-meeting call alone", () => {
+    const lines = [line("me", 0, "Hi."), line("them", 61, "Next one."), line("me", 1800, "Hello, Frank.")];
+    const meetings = [
+      { title: "Innovation Team DSU", start: NINE - 60_000 },
+      { title: "Frank & Ryan", start: NINE + 1_000_000 },
+    ];
+    expect(transcriptText(lines, [], meetings)).toMatch(
+      /^— Innovation Team DSU —\n9:30\sAM You: Hi\.\n9:31\sAM Them: Next one\.\n\n— Frank & Ryan —\n10:00\sAM You: Hello, Frank\.$/,
+    );
+    expect(transcriptText(lines, [], meetings.slice(0, 1))).not.toContain("—");
+  });
+
   it("should name each voice on the other side, and start a new turn when the voice changes", () => {
     const speakers = [
       { id: 1, number: 1, name: "Dana", sure: true },
@@ -125,6 +137,7 @@ describe("stateText", () => {
     start: NINE,
     end: NINE + 60_000,
     meetingTitle: null,
+    meetings: [],
     mic: true,
     error: null,
     audioKept: true,

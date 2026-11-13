@@ -12,6 +12,12 @@ export const START_AFTER_MS = 5_000;
  */
 export const STOP_AFTER_MS = 30_000;
 
+/**
+ * An app that wasn't on the call must hold the microphone this long before it counts as a new call (Zoom, then
+ * Meet in Chrome, then Teams) and starts a new recording, so a quick mic check in another app doesn't split one.
+ */
+export const SWITCH_AFTER_MS = 20_000;
+
 /** What the controller needs, injected for tests. */
 export interface RecordingControllerDeps {
   store: Pick<RecordingStore, "insertRecording" | "markNoMic" | "finishRecording">;
@@ -34,6 +40,8 @@ export interface RecordingControllerDeps {
 interface ActiveRecording {
   id: number;
   handle: RecorderHandle;
+  /** The apps that have used the microphone during it. */
+  apps: Set<string>;
 }
 
 /**
@@ -48,6 +56,8 @@ export class RecordingController {
   private lastCallAt = Number.NEGATIVE_INFINITY;
   /** The recorder failed during this call; wait for the call to end before trying again. */
   private failedThisCall = false;
+  /** When an app not on the recording's call started using the microphone, or null when none has. */
+  private newAppSince: number | null = null;
 
   /** @param deps The store, recorder, transcriber and clock. */
   constructor(private readonly deps: RecordingControllerDeps) {}
@@ -55,22 +65,49 @@ export class RecordingController {
   /**
    * Takes one front-window sample's call state.
    * @param onCall Whether some app other than Krisp or Time Center is using the microphone.
+   * @param callApps Which apps are using it. One that wasn't on the recording's call, holding it for
+   * SWITCH_AFTER_MS, means you've moved to another call: the recording ends and a new one starts.
    */
-  callSample(onCall: boolean): void {
+  callSample(onCall: boolean, callApps: readonly string[] = []): void {
     const now = this.deps.now();
     if (!onCall) {
       if (!this.active) {
         this.callStartedAt = null;
       }
+      this.newAppSince = null;
       this.tick();
       return;
     }
     this.lastCallAt = now;
     this.callStartedAt ??= now;
+    if (this.active && this.isNewCall(callApps, now)) {
+      this.finish(now);
+    }
     // Checked on every sample, so a call still going when your own block ends is recorded from then on.
     if (!this.active && !this.failedThisCall && now - this.callStartedAt >= START_AFTER_MS && !this.deps.isSoloTime(now)) {
-      this.start(now);
+      this.start(now, callApps);
     }
+  }
+
+  /**
+   * Says whether the apps on the microphone show you've moved to another call: one that wasn't on this
+   * recording's call has held it for SWITCH_AFTER_MS. Until then it waits; once it goes, the wait starts over.
+   * @param callApps The apps using the microphone now.
+   * @param now The current time.
+   * @returns True when the recording should end so a new one can start.
+   */
+  private isNewCall(callApps: readonly string[], now: number): boolean {
+    const apps = this.active?.apps ?? new Set<string>();
+    if (!callApps.some((app) => !apps.has(appFamily(app)))) {
+      this.newAppSince = null;
+      return false;
+    }
+    this.newAppSince ??= now;
+    if (now - this.newAppSince < SWITCH_AFTER_MS) {
+      return false;
+    }
+    this.newAppSince = null;
+    return true;
   }
 
   /** Stops a recording whose call has been over long enough. Also run on a timer, as samples can stop coming. */
@@ -107,8 +144,9 @@ export class RecordingController {
   /**
    * Starts a recording row and the recorder.
    * @param now The current time.
+   * @param callApps The apps on the call, to notice when you move to another one.
    */
-  private start(now: number): void {
+  private start(now: number, callApps: readonly string[]): void {
     const stamp = localStamp(now);
     // Working files go in a hidden folder; the recordings folder itself holds only the named calls.
     const folder = join(this.deps.recordingsDir, ".work", stamp.day, `${stamp.time}${stamp.zone}`);
@@ -137,7 +175,7 @@ export class RecordingController {
         this.deps.onChange();
       },
     });
-    this.active = { id, handle };
+    this.active = { id, handle, apps: new Set(callApps.map(appFamily)) };
     this.deps.onChange();
   }
 
@@ -155,4 +193,18 @@ export class RecordingController {
     active.handle.stop();
     this.deps.onChange();
   }
+}
+
+/**
+ * Names the app behind a process on the microphone, so an app's helper processes count as the app: a bundle id's
+ * first two parts ("us.zoom.xos" and "us.zoom.CptHost" are both "us.zoom"), or a process name without " Helper…"
+ * ("Google Chrome Helper" is "Google Chrome").
+ * @param app A bundle id, or a process name.
+ * @returns The app's family.
+ */
+export function appFamily(app: string): string {
+  if (app.includes(" ") || !app.includes(".")) {
+    return app.replace(/ Helper.*$/, "");
+  }
+  return app.split(".").slice(0, 2).join(".").toLowerCase();
 }

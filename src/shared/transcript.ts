@@ -1,4 +1,4 @@
-import type { CallSpeaker, TranscriptLine } from "./ipc";
+import type { CallMeeting, CallSpeaker, TranscriptLine } from "./ipc";
 
 /** One speaker's turn: their lines in a row, joined. */
 export interface Turn {
@@ -173,15 +173,37 @@ function wordsOf(text: string): Set<string> {
 
 /**
  * Writes a call's transcript as plain text for the clipboard and for Claude: "9:31 AM Dana: …", one turn per
- * line.
+ * line. A call that ran through several meetings gets a "— Frank & Ryan —" line where each one starts.
  * @param lines The call's lines.
  * @param speakers The call's speakers.
+ * @param meetings The meetings the call ran through, in order.
  * @returns The text.
  */
-export function transcriptText(lines: TranscriptLine[], speakers: readonly CallSpeaker[] = []): string {
-  return groupTurns(lines, speakers)
-    .map((turn) => `${formatClock(turn.start)} ${speakerLabel(turn, speakers)}: ${turn.text}`)
+export function transcriptText(lines: TranscriptLine[], speakers: readonly CallSpeaker[] = [], meetings: readonly CallMeeting[] = []): string {
+  const turns = groupTurns(lines, speakers);
+  return turns
+    .map((turn, index) => {
+      const meeting = meetingStartingAt(turns, index, meetings);
+      const text = `${formatClock(turn.start)} ${speakerLabel(turn, speakers)}: ${turn.text}`;
+      return meeting ? `${index > 0 ? "\n" : ""}— ${meeting.title} —\n${text}` : text;
+    })
     .join("\n");
+}
+
+/**
+ * Finds the meeting that starts at a turn: the last meeting to start after the turn before it and by this one.
+ * A call with one meeting (or none) never gets one, since its title already says it.
+ * @param turns The call's turns, in order.
+ * @param index The turn.
+ * @param meetings The meetings the call ran through, in order.
+ * @returns The meeting to head the turn with, or null.
+ */
+export function meetingStartingAt(turns: readonly { start: number }[], index: number, meetings: readonly CallMeeting[]): CallMeeting | null {
+  if (meetings.length < 2) {
+    return null;
+  }
+  const after = index > 0 ? turns[index - 1].start : -Infinity;
+  return meetings.filter((meeting) => meeting.start > after && meeting.start <= turns[index].start).at(-1) ?? null;
 }
 
 /**

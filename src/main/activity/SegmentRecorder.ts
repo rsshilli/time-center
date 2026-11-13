@@ -12,6 +12,8 @@ export interface WindowSample {
   ignored: boolean;
   /** True while an app (Zoom, Chrome for Meet, Teams…) is using the microphone, i.e. you're on a call. */
   onCall?: boolean;
+  /** The apps using the microphone for the call (bundle ids, or a process name), so a new call starts a new recording. */
+  callApps?: string[];
 }
 
 /** Counted as away after this long without keyboard or mouse input (user's pick: 5 minutes). */

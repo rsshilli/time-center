@@ -105,7 +105,7 @@ function RecordingItem({ recording }: { recording: CallRecording }) {
   /** Puts the transcript on the clipboard as plain text. */
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(transcriptText(recording.lines, recording.speakers));
+      await navigator.clipboard.writeText(transcriptText(recording.lines, recording.speakers, recording.meetings));
       setMessage("Transcript copied");
     } catch (caught) {
       setMessage(`Couldn't copy it: ${readableError(caught)}`);

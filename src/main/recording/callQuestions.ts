@@ -11,7 +11,7 @@ import { localDayBounds } from "../activity/dayReport";
 import type { HaikuClient } from "../calendar/BedrockHaiku";
 import type { CalendarEvent } from "../calendar/meetingLinks";
 import type { CallQuestionStore } from "./CallQuestionStore";
-import { bestMeeting } from "./callMeeting";
+import { callSections, callTitle, WINDOWS_BEFORE_MS, type CallWindow } from "./callMeeting";
 import type { RecordingStore, StoredRecording } from "./RecordingStore";
 
 /** Transcript text sent with one question, at most (~75k tokens), so a question stays quick and cheap. */
@@ -69,6 +69,8 @@ export interface CallQuestionDeps {
   questions: Pick<CallQuestionStore, "insertQuestion">;
   /** The calendar's meetings in a time range, to name each call. */
   listMeetings(from: number, to: number): CalendarEvent[];
+  /** The front windows in a time range, to tell which meeting a call was in when two overlap. */
+  listWindows(from: number, to: number): CallWindow[];
   /** Sonnet on Bedrock. */
   claude: Pick<HaikuClient, "invoke">;
   /** A call's speakers, so the transcript names who said what. */
@@ -384,7 +386,7 @@ function longDate(ms: number): string {
 }
 
 /**
- * Names each call after the meeting it overlapped most.
+ * Names each call after the meetings it ran through.
  * @param deps The calendar.
  * @param recordings The calls.
  * @returns Each call's meeting title, or null.
@@ -398,8 +400,9 @@ function titleCalls(deps: CallQuestionDeps, recordings: StoredRecording[]): Map<
   const from = Math.min(...recordings.map((recording) => recording.start));
   const to = Math.max(...recordings.map((recording) => recording.end ?? now));
   const meetings = deps.listMeetings(from, to).filter((meeting) => meeting.response !== "declined");
+  const windows = deps.listWindows(from - WINDOWS_BEFORE_MS, to);
   for (const recording of recordings) {
-    titles.set(recording.id, bestMeeting(recording, meetings, now)?.title ?? null);
+    titles.set(recording.id, callTitle(callSections(recording, meetings, windows, now)));
   }
   return titles;
 }

@@ -164,7 +164,7 @@ async function main(): Promise<void> {
     isSoloTime: (now) => isSoloTime(calendar.store.listEvents(now, now + 1), now),
     now: () => Date.now(),
   });
-  const tracker = createTracker(activity, ignoredApps, (onCall) => recorder.callSample(onCall));
+  const tracker = createTracker(activity, ignoredApps, (onCall, callApps) => recorder.callSample(onCall, callApps));
   const screenshotsDir = join(app.getPath("userData"), "screenshots");
   const capturer = new ScreenCapturer({
     activity,
@@ -240,6 +240,7 @@ async function main(): Promise<void> {
     transcriber,
     speakers: speakerStore,
     listMeetings: (from, to) => calendar.store.listTypedEvents(from, to),
+    listWindows: (from, to) => activity.listSegments(from, to),
     showInFinder: (path) => {
       if (path.endsWith(".m4a")) {
         shell.showItemInFolder(path);
@@ -254,6 +255,7 @@ async function main(): Promise<void> {
           recordings,
           questions: callQuestions,
           listMeetings: (from, to) => calendar.store.listTypedEvents(from, to),
+          listWindows: (from, to) => activity.listSegments(from, to),
           claude: sonnet,
           speakers: (id) => callSpeakers(speakerStore, id),
           now: () => Date.now(),
@@ -378,13 +380,13 @@ async function main(): Promise<void> {
  * Builds the activity tracker on the Swift front-window helper and macOS's idle timer.
  * @param activity The activity tables.
  * @param ignoredApps Reads the current ignored-apps list; each helper start picks up the latest.
- * @param onCallState Told whether each sample saw a call, to start and stop recording.
+ * @param onCallState Told whether each sample saw a call and which apps are on it, to start, split and stop recording.
  * @returns The tracker, not yet started.
  */
 function createTracker(
   activity: ActivityStore,
   ignoredApps: () => string[],
-  onCallState: (onCall: boolean) => void,
+  onCallState: (onCall: boolean, callApps: string[]) => void,
 ): ActivityTracker {
   return new ActivityTracker({
     recorder: new SegmentRecorder(activity),

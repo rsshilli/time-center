@@ -20,7 +20,7 @@ export interface ActivityTrackerDeps {
   getIdleMs(): number;
   now(): number;
   /** Told whether each sample saw a call, even while recording is paused (a call goes on with the screen locked). */
-  onCallState?(onCall: boolean): void;
+  onCallState?(onCall: boolean, callApps: string[]): void;
 }
 
 /**
@@ -82,7 +82,7 @@ export class ActivityTracker {
    * @param sample What was in front.
    */
   private onSample(sample: WindowSample): void {
-    this.deps.onCallState?.(sample.onCall === true);
+    this.deps.onCallState?.(sample.onCall === true, sample.callApps ?? []);
     if (this.pausedFor.size > 0) {
       return;
     }

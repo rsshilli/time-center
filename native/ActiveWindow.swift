@@ -35,6 +35,18 @@ struct Sample: Encodable {
     let url: String?
     let ignored: Bool
     let onCall: Bool
+    /// The apps using the microphone for the call, so moving to a different call starts a new recording.
+    let callApps: [String]
+
+    init(app: String?, bundleId: String?, title: String?, url: String?, ignored: Bool, callApps: [String]) {
+        self.app = app
+        self.bundleId = bundleId
+        self.title = title
+        self.url = url
+        self.ignored = ignored
+        self.onCall = !callApps.isEmpty
+        self.callApps = callApps
+    }
 }
 
 /// Chrome's bundle ids (stable, beta, dev, canary) all start with this.
@@ -76,11 +88,11 @@ final class Reporter {
     /// Works out the current sample.
     private func read() -> Sample {
         guard let app = NSWorkspace.shared.frontmostApplication else {
-            return Sample(app: nil, bundleId: nil, title: nil, url: nil, ignored: false, onCall: calls.isOnCall())
+            return Sample(app: nil, bundleId: nil, title: nil, url: nil, ignored: false, callApps: calls.callApps())
         }
         let bundleId = app.bundleIdentifier
         if isIgnored(app, ignored) {
-            return Sample(app: app.localizedName, bundleId: bundleId, title: nil, url: nil, ignored: true, onCall: calls.isOnCall())
+            return Sample(app: app.localizedName, bundleId: bundleId, title: nil, url: nil, ignored: true, callApps: calls.callApps())
         }
         let title = focusedWindowTitle(pid: app.processIdentifier) ?? frontWindowName(pid: app.processIdentifier)
         var url: String? = nil
@@ -90,7 +102,7 @@ final class Reporter {
             // Coming back to Chrome later must ask again, even if the title happens to match.
             lastUrlKey = nil
         }
-        return Sample(app: app.localizedName, bundleId: bundleId, title: title, url: url, ignored: false, onCall: calls.isOnCall())
+        return Sample(app: app.localizedName, bundleId: bundleId, title: title, url: url, ignored: false, callApps: calls.callApps())
     }
 
     /// The focused window's title via Accessibility. Nil without the Accessibility permission.
@@ -199,15 +211,19 @@ let ownAppBundle: String? = {
 /// (Core Audio's per-process input state, macOS 14+, needs no permission). Browser calls count too:
 /// Chrome's audio helper has no bundle id of its own, and was seen capturing during a real Meet call.
 final class CallDetector {
-    /// Says whether a call is going right now.
-    func isOnCall() -> Bool {
-        return capturingProcesses().contains { pid in
+    /// Names the apps on a call right now: each process capturing the microphone that isn't one of those above,
+    /// by bundle id, or by executable name when it has none (Chrome's audio helper). Empty when no call is going.
+    func callApps() -> [String] {
+        let names = capturingProcesses().compactMap { pid -> String? in
             let bundleId = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
             let path = processPath(pid)
-            return pid != getpid() && !notACall.contains { bundleId == $0 || bundleId.hasPrefix($0 + ".") }
-                && !notACallExecutables.contains(URL(fileURLWithPath: path).lastPathComponent)
+            let executable = URL(fileURLWithPath: path).lastPathComponent
+            let isCall = pid != getpid() && !notACall.contains { bundleId == $0 || bundleId.hasPrefix($0 + ".") }
+                && !notACallExecutables.contains(executable)
                 && !(ownAppBundle.map { path.hasPrefix($0) } ?? false)
+            return isCall ? (bundleId.isEmpty ? executable : bundleId) : nil
         }
+        return Array(Set(names)).sorted()
     }
 }
 

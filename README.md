@@ -30,7 +30,12 @@ which Claude reads for action items, and a TODO you choose to make into a Jira t
 - **Transcribes calls on your Mac.** Transcription uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
   at low priority, and nothing is uploaded.
 - **Recordings tab.** Your calls for the day, each with its transcript, a Copy button and a link to the
-  audio file. Pick a day in either the Today tab or the Recordings tab, and the other tab shows the same day.
+  audio file. Moving to a call in another app (Zoom, then Meet in Chrome, then Teams) starts a new recording
+  once the new app has had the microphone for 20 seconds. One call that runs through several calendar meetings
+  is named after each of them, with a heading in the transcript where each starts. Which meeting you were in
+  comes from the calendar and the window in front: a Meet tab or Teams window that names the meeting wins. Zoom's
+  windows don't name the meeting, so for Zoom the calendar decides, and an accepted meeting comes before a
+  "maybe" that overlaps it. Pick a day in either the Today tab or the Recordings tab, and the other tab shows the same day.
 - **Action items during a call.** While a call is going, the Recordings tab shows its transcript on the
   left as it's heard and, on the right, the five newest possible action items ("You: send Dana the test
   cards"), found by Claude Haiku. Haiku only reads the call while that tab is open and the window is in

@@ -47,7 +47,7 @@ describe("callQuestions", () => {
     questions = new CallQuestionStore(store.db);
     meetings = [];
     invoke = vi.fn<(body: object) => Promise<unknown>>(async () => ({ content: [{ type: "text", text: "  Dana wants test cards for Europe.  " }] }));
-    deps = { recordings, questions, listMeetings: () => meetings, claude: { invoke }, speakers: () => [], now: () => TUE + 8 * 60 * MIN };
+    deps = { recordings, questions, listMeetings: () => meetings, listWindows: () => [], claude: { invoke }, speakers: () => [], now: () => TUE + 8 * 60 * MIN };
   });
 
   afterEach(() => {

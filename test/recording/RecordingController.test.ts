@@ -1,4 +1,4 @@
-import { RecordingController, START_AFTER_MS, STOP_AFTER_MS } from "../../src/main/recording/RecordingController";
+import { appFamily, RecordingController, START_AFTER_MS, STOP_AFTER_MS, SWITCH_AFTER_MS } from "../../src/main/recording/RecordingController";
 import type { AudioChunk, RecorderEvents } from "../../src/main/recording/recorderProcess";
 
 /**
@@ -38,9 +38,9 @@ function setUp() {
    * @param onCall The call state of each.
    * @param ms How long.
    */
-  const samples = (onCall: boolean, ms: number) => {
+  const samples = (onCall: boolean, ms: number, callApps: string[] = []) => {
     for (let elapsed = 0; elapsed < ms; elapsed += 3_000) {
-      controller.callSample(onCall);
+      controller.callSample(onCall, callApps);
       clock.now += 3_000;
     }
   };
@@ -48,6 +48,40 @@ function setUp() {
 }
 
 describe("RecordingController", () => {
+  it("should start a new recording when another app takes the microphone for a different call", () => {
+    const { controller, log, clock, recorders, samples } = setUp();
+    samples(true, 60_000, ["us.zoom.xos"]);
+    // Zoom still holds the microphone for a moment after you join Meet in Chrome.
+    samples(true, 6_000, ["Google Chrome Helper", "us.zoom.xos"]);
+    samples(true, SWITCH_AFTER_MS, ["Google Chrome Helper"]);
+    expect(recorders).toHaveLength(2);
+    expect(recorders[0].stopped).toBe(true);
+    expect(controller.isRecording()).toBe(true);
+    // Chrome came on at 1,060,000; the first 3-second sample at least SWITCH_AFTER_MS later splits the call.
+    const switchedAt = 1_060_000 + Math.ceil(SWITCH_AFTER_MS / 3_000) * 3_000;
+    expect(log).toContain(`finish 1 ${switchedAt}`);
+    expect(log.filter((line) => line.startsWith("insert")).map((line) => Number(line.split(" ")[1]))).toEqual([1_006_000, switchedAt]);
+    // Back to Zoom for the next meeting: a third recording.
+    samples(true, SWITCH_AFTER_MS + 3_000, ["us.zoom.xos"]);
+    expect(recorders).toHaveLength(3);
+    expect(clock.now).toBeGreaterThan(switchedAt);
+  });
+
+  it("should keep one recording when another app holds the microphone only briefly, or it's the same app's helper", () => {
+    const { recorders, samples } = setUp();
+    samples(true, 30_000, ["us.zoom.xos"]);
+    samples(true, SWITCH_AFTER_MS - 3_000, ["com.google.Chrome", "us.zoom.xos"]);
+    samples(true, 30_000, ["us.zoom.xos"]);
+    samples(true, 60_000, ["us.zoom.CptHost", "us.zoom.xos"]);
+    expect(recorders).toHaveLength(1);
+  });
+
+  it("should never split when the helper doesn't say which apps are on the call", () => {
+    const { recorders, samples } = setUp();
+    samples(true, 120_000);
+    expect(recorders).toHaveLength(1);
+  });
+
   it("should not record during time blocked out for just you, and start once that block is over", () => {
     const { controller, clock, recorders, samples, solo } = setUp();
     solo.until = clock.now + 60_000;
@@ -126,5 +160,14 @@ describe("RecordingController", () => {
     samples(false, STOP_AFTER_MS + 3_000);
     samples(true, 9_000);
     expect(recorders).toHaveLength(2);
+  });
+});
+
+describe("appFamily", () => {
+  it("should count an app's helper processes as the app", () => {
+    expect(appFamily("us.zoom.CptHost")).toBe(appFamily("us.zoom.xos"));
+    expect(appFamily("Google Chrome Helper (Renderer)")).toBe("Google Chrome");
+    expect(appFamily("com.microsoft.teams2")).toBe("com.microsoft");
+    expect(appFamily("coreaudiod")).toBe("coreaudiod");
   });
 });

@@ -67,6 +67,7 @@ export function parseSample(line: string): WindowSample | null {
       url: stringOrNull(value.url),
       ignored: value.ignored === true,
       onCall: value.onCall === true,
+      callApps: Array.isArray(value.callApps) ? value.callApps.filter((app): app is string => typeof app === "string" && app !== "") : [],
     };
   } catch {
     return null;

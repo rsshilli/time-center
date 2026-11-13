@@ -199,11 +199,16 @@ describe("parseSample", () => {
       url: "https://x",
       ignored: false,
       onCall: false,
+      callApps: [],
     });
   });
 
-  it("should read whether a call is going", () => {
+  it("should read whether a call is going, and which apps are on it", () => {
     expect(parseSample('{"app":"zoom.us","ignored":false,"onCall":true}')?.onCall).toBe(true);
+    expect(parseSample('{"onCall":true,"callApps":["us.zoom.xos","",7,"Google Chrome Helper"]}')?.callApps).toEqual([
+      "us.zoom.xos",
+      "Google Chrome Helper",
+    ]);
   });
 
   it("should turn missing fields into null", () => {
@@ -214,6 +219,7 @@ describe("parseSample", () => {
       url: null,
       ignored: true,
       onCall: false,
+      callApps: [],
     });
   });
 

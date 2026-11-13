@@ -76,7 +76,8 @@ export function LiveCallCard({ recording }: { recording: CallRecording }) {
     <div className="card live-call">
       <div className="live-head">
         <h2>
-          <span className="live-dot">●</span> {recording.meetingTitle ?? "Call"}
+          {/* The meeting you're in now, when the call has run through several. */}
+          <span className="live-dot">●</span> {recording.meetings.at(-1)?.title ?? recording.meetingTitle ?? "Call"}
         </h2>
         <span className="muted">
           {recording.end === null ? `Since ${formatClock(recording.start)}` : "Ended; finishing the transcript"}

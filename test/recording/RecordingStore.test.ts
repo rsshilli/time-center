@@ -84,6 +84,7 @@ describe("RecordingStore", () => {
         store: recordings,
         transcriber: { waiting: () => 2, currentProblem: () => null },
         listMeetings: () => meetings,
+        listWindows: () => [],
         countUnread: () => 0,
         actionItems: { getItems: (id) => ({ recordingId: id, items: [{ text: "You: book it", saidAt: NOON }], coveredUntil: NOON, coveredLines: 1, checkedAt: NOON }) },
         speakers: new SpeakerStore(store.db),

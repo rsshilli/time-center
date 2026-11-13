@@ -186,14 +186,22 @@ export interface NamedVoice {
   calls: number;
 }
 
+/** One of the meetings a call ran through, and when in the call it starts. */
+export interface CallMeeting {
+  title: string;
+  start: number;
+}
+
 /** A recorded call, as Today shows it. */
 export interface CallRecording {
   id: number;
   start: number;
   /** Null while it is still recording. */
   end: number | null;
-  /** The calendar meeting it overlapped most, if any. */
+  /** The titles of the meetings it ran through, in order ("Frank & Ryan · Dept. OB: Innovation"), if any. */
   meetingTitle: string | null;
+  /** Where each of those meetings starts in the call, in order; empty when it matched none. */
+  meetings: CallMeeting[];
   /** False when macOS refused the microphone, so only the other side was recorded. */
   mic: boolean;
   /** Why recording stopped early, if it did. */

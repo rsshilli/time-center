@@ -10,6 +10,7 @@ const call = (fields: Partial<CallRecording>): CallRecording => ({
   start: NINE,
   end: NINE + 30 * MIN,
   meetingTitle: null,
+  meetings: [],
   mic: true,
   error: null,
   audioKept: true,

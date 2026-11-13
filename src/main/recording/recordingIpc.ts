@@ -15,7 +15,7 @@ import { assertMoment, assertRowId } from "../ipcHandlers";
 import { describeSpeakers, nameChoices } from "../speakers/speakerIpc";
 import type { SpeakerStore } from "../speakers/SpeakerStore";
 import type { ActionItemStore } from "./ActionItemStore";
-import { bestMeeting } from "./callMeeting";
+import { callSections, callTitle, WINDOWS_BEFORE_MS, type CallWindow } from "./callMeeting";
 import type { RecordingStore } from "./RecordingStore";
 import type { Transcriber } from "./Transcriber";
 
@@ -25,6 +25,8 @@ export interface RecordingIpcDependencies {
   transcriber: Pick<Transcriber, "waiting" | "currentProblem">;
   /** The calendar's meetings in a time range, to name each call. */
   listMeetings(from: number, to: number): CalendarEvent[];
+  /** The front windows in a time range, to tell which meeting a call was in when two overlap. */
+  listWindows(from: number, to: number): CallWindow[];
   /** Shows a file (selected in its folder) or a folder in Finder. */
   showInFinder(path: string): void;
   /** How many chunks in a recording's folder whisper couldn't read. */
@@ -117,28 +119,31 @@ export function assertDictation(value: unknown): Uint8Array {
 }
 
 /**
- * Collects the day's calls with their transcripts and the meeting each overlapped most.
+ * Collects the day's calls with their transcripts and the meetings each ran through.
  * @param deps The services.
  * @param at A moment in the day.
  * @returns The report.
  */
 export function buildRecordingsReport(
-  deps: Pick<RecordingIpcDependencies, "store" | "transcriber" | "listMeetings" | "countUnread" | "actionItems" | "speakers" | "now">,
+  deps: Pick<RecordingIpcDependencies, "store" | "transcriber" | "listMeetings" | "listWindows" | "countUnread" | "actionItems" | "speakers" | "now">,
   at: number,
 ): RecordingsReport {
   const { dayStart, dayEnd } = localDayBounds(at);
   const meetings = deps.listMeetings(dayStart, dayEnd).filter((meeting) => meeting.response !== "declined");
+  const windows = deps.listWindows(dayStart - WINDOWS_BEFORE_MS, dayEnd);
   const voices = deps.speakers.listVoices();
   const names = new Map(voices.map((voice) => [voice.id, voice.name]));
   const recordings = deps.store.listRecordings(dayStart, dayEnd).map((recording): CallRecording => {
     const lines = deps.store.listLines(recording.id);
     const saved = deps.actionItems.getItems(recording.id);
-    const meeting = bestMeeting(recording, meetings, deps.now());
+    const sections = callSections(recording, meetings, windows, deps.now());
+    const invitees = sections.flatMap((section) => section.meeting.attendees);
     return {
       id: recording.id,
       start: recording.start,
       end: recording.end,
-      meetingTitle: meeting?.title ?? null,
+      meetingTitle: callTitle(sections),
+      meetings: sections.map((section) => ({ title: section.meeting.title, start: section.start })),
       mic: recording.mic,
       error: recording.error,
       audioKept: !recording.audioDeleted,
@@ -146,7 +151,7 @@ export function buildRecordingsReport(
       unreadChunks: recording.audioDeleted ? 0 : deps.countUnread(recording.folder),
       lines,
       speakers: describeSpeakers(deps.speakers.listSpeakers(recording.id), names),
-      nameChoices: nameChoices(meeting?.attendees ?? [], voices.map((voice) => voice.name)),
+      nameChoices: nameChoices(invitees,voices.map((voice) => voice.name)),
       actionItems: saved?.items ?? [],
       actionItemsBehind: saved !== null && lines.length > saved.coveredLines,
     };
