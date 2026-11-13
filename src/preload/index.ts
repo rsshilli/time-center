@@ -51,6 +51,7 @@ const api: TimeCenterApi = {
   draftJiraTicket: (todoId, current, instruction) => ipcRenderer.invoke(IPC.draftJiraTicket, todoId, current, instruction),
   searchJiraUsers: (query) => ipcRenderer.invoke(IPC.searchJiraUsers, query),
   createJiraTicket: (todoId, draft) => ipcRenderer.invoke(IPC.createJiraTicket, todoId, draft),
+  getSprintTickets: () => ipcRenderer.invoke(IPC.getSprintTickets),
   prepareQbdcodeHandoff: (todoId) => ipcRenderer.invoke(IPC.prepareQbdcodeHandoff, todoId),
   sendToQbdcode: (todoId, worktreePath, text) => ipcRenderer.invoke(IPC.sendToQbdcode, todoId, worktreePath, text),
   nameSpeaker: (speakerId, name) => ipcRenderer.invoke(IPC.nameSpeaker, speakerId, name),

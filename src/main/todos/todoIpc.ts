@@ -3,6 +3,7 @@ import {
   IPC,
   type JiraDraftResult,
   type JiraUser,
+  type SprintTicketsReport,
   MAX_TODO_CHARS,
   type QbdcodeHandoff,
   type TodoDialog,
@@ -48,6 +49,8 @@ export interface TodoIpcDependencies {
   searchJiraUsers(query: unknown): Promise<JiraUser[]>;
   /** Makes the ticket; returns where it went. */
   createJiraTicket(todo: Todo, draft: unknown): Promise<Omit<TodoSent, "at">>;
+  /** Your Jira tickets in the open sprints. */
+  getSprintTickets(): Promise<SprintTicketsReport>;
   /** The instructions and worktrees the QbDCode popup starts with. */
   prepareQbdcodeHandoff(todo: Todo): QbdcodeHandoff;
   /** Starts the QbDCode chat; returns where it went. */
@@ -105,7 +108,8 @@ export function registerTodoIpc(deps: TodoIpcDependencies): void {
     await recordSent(deps, assertRowId(id), "jira", (todo) => deps.createJiraTicket(todo, draft));
     return list();
   });
-  ipcMain.handle(IPC.prepareQbdcodeHandoff, (_event, id: unknown) => deps.prepareQbdcodeHandoff(openTodo(deps.store, assertRowId(id))));
+  ipcMain.handle(IPC.getSprintTickets, () => deps.getSprintTickets());
+  ipcMain.handle(IPC.prepareQbdcodeHandoff,(_event, id: unknown) => deps.prepareQbdcodeHandoff(openTodo(deps.store, assertRowId(id))));
   ipcMain.handle(IPC.sendToQbdcode, async (_event, id: unknown, path: unknown, text: unknown) => {
     await recordSent(deps, assertRowId(id), "qbdcode", () => deps.sendToQbdcode(path, text));
     return list();

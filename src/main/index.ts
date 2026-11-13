@@ -64,7 +64,7 @@ import { enableStartAtLoginOnce } from "./startAtLogin";
 import { SecretStore } from "./store/SecretStore";
 import { Store } from "./store/Store";
 import { type HandoffDependencies, handoffActions, prepareQbdcodeHandoff, sendToQbdcode } from "./todos/handoff";
-import { createJiraTicket, jiraActions, readJiraSettings, saveJiraSettings, searchAssignees } from "./todos/jira";
+import { createJiraTicket, jiraActions, listMySprintTickets, readJiraSettings, saveJiraSettings, searchAssignees } from "./todos/jira";
 import { draftJiraTicket } from "./todos/jiraDraft";
 import { registerTodoIpc } from "./todos/todoIpc";
 import { TodoStore } from "./todos/TodoStore";
@@ -297,6 +297,7 @@ async function main(): Promise<void> {
       draftJiraTicket({ jira, claude: sonnet, callTranscript: handoff.callTranscript, now: () => Date.now() }, todo, current, instruction),
     searchJiraUsers: (query) => searchAssignees(jira, query),
     createJiraTicket: (todo, draft) => createJiraTicket(jira, todo, draft),
+    getSprintTickets: () => listMySprintTickets(jira),
     prepareQbdcodeHandoff: (todo) => prepareQbdcodeHandoff(handoff, todo),
     sendToQbdcode: (path, text) => sendToQbdcode(handoff, path, text),
     now: () => Date.now(),

@@ -1624,6 +1624,64 @@ button.link.todo-source {
   margin-bottom: 10px;
 }
 
+/* Your sprint's Jira tickets: read from Jira, so no drop spot and no Add box. */
+.sprint-tickets h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.sprint-refresh {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.sprint-ticket-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.sprint-ticket {
+  display: grid;
+  grid-template-columns: 76px 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.sprint-ticket a {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sprint-ticket-summary {
+  min-width: 0;
+}
+
+.sprint-ticket.done {
+  opacity: 0.55;
+}
+
+.sprint-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.sprint-status.doing {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .todo-section-tag {
   font-size: 11px;
   font-weight: 600;

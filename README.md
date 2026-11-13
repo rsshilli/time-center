@@ -50,7 +50,9 @@ which Claude reads for action items, and a TODO you choose to make into a Jira t
   and press Enter; it formats as you type (**bold**, _italics_, `code`, lists, "[ ] " sub-steps) and is saved
   as Markdown. Select words and press ⌘K to link them, or paste an address over them. Drag ⋮⋮ to reorder an
   item or move it to the other section. Tick items off (they fold into one Done section, tagged Work or
-  Personal), and use an item's ⋯ menu to make a Jira ticket from it. Each action item from a call has an
+  Personal), and use an item's ⋯ menu to make a Jira ticket from it. Between Work and Personal, a **Jira** list
+  shows the tickets assigned to you in the sprints going now, each with its status and a link to it; it's read
+  from Jira when you open the tab and every five minutes (finished tickets sit dimmed at the bottom). Each action item from a call has an
   **Add to TODOs** button; it goes into Work, and the TODO links back to the call.
 - **Settings.** Category rules (with a filter box to find one), apps to ignore, your calendar, meeting
   types, Jira and the weekly backup.

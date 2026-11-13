@@ -6,6 +6,8 @@ import {
   type JiraUser,
   MAX_JIRA_DESCRIPTION_CHARS,
   MAX_JIRA_SUMMARY_CHARS,
+  type SprintTicket,
+  type SprintTicketsReport,
   type Todo,
   type TodoSent,
 } from "../../shared/ipc";
@@ -58,6 +60,9 @@ export const TEAM_FIELD_NAME = "Engineering Team";
 
 /** The kind of field Jira Software's Sprint is, found by this rather than its name or id. */
 const SPRINT_FIELD_TYPE = "com.pyxis.greenhopper.jira:gh-sprint";
+
+/** The most of your sprint tickets the TODO tab lists; one page of Jira's search. */
+const MAX_SPRINT_TICKETS = 100;
 
 /** The most pages of boards or sprints read; at 50 a page, far more than a project has. */
 const MAX_AGILE_PAGES = 10;
@@ -428,6 +433,67 @@ async function pagesOf<T>(deps: JiraDependencies, path: string): Promise<T[]> {
 function readDate(value: unknown): number | null {
   const time = typeof value === "string" ? Date.parse(value) : NaN;
   return Number.isNaN(time) ? null : time;
+}
+
+/**
+ * The tickets assigned to you in any sprint going now, in the board's order with finished ones last, for the TODO
+ * tab. Never throws: Jira not set up or unreachable comes back as the report's problem.
+ * @param deps The saved settings and fetch.
+ * @returns The tickets, the sprints they're in, or why they couldn't be read.
+ */
+export async function listMySprintTickets(deps: JiraDependencies): Promise<SprintTicketsReport> {
+  const unavailable = jiraUnavailable(deps);
+  if (unavailable) {
+    return { tickets: [], sprints: [], problem: unavailable };
+  }
+  try {
+    const config = savedConfig(deps);
+    const fields = (await jiraRequest(deps.fetch, config, "GET", "/rest/api/3/field")) as { id?: unknown; schema?: { custom?: unknown } }[];
+    const sprintField = Array.isArray(fields) ? fields.find((field) => field.schema?.custom === SPRINT_FIELD_TYPE)?.id : undefined;
+    const params = new URLSearchParams({
+      jql: "assignee = currentUser() AND sprint in openSprints() ORDER BY Rank ASC",
+      fields: ["summary", "status", "issuetype", ...(typeof sprintField === "string" ? [sprintField] : [])].join(","),
+      maxResults: String(MAX_SPRINT_TICKETS),
+    });
+    const reply = (await jiraRequest(deps.fetch, config, "GET", `/rest/api/3/search/jql?${params}`)) as { issues?: unknown[] };
+    const issues = (reply.issues ?? []).map((issue) => readSprintIssue(issue, config.site, typeof sprintField === "string" ? sprintField : null));
+    const tickets = issues.flatMap((issue) => (issue ? [issue.ticket] : []));
+    const sprints = [...new Set(issues.flatMap((issue) => issue?.activeSprints ?? []))];
+    // Stable, so each group keeps the board's order.
+    tickets.sort((a, b) => Number(a.statusCategory === "done") - Number(b.statusCategory === "done"));
+    return { tickets, sprints, problem: null };
+  } catch (error) {
+    return { tickets: [], sprints: [], problem: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Reads one ticket from Jira's search answer.
+ * @param value The issue as Jira sent it.
+ * @param site The Jira site, for the ticket's address.
+ * @param sprintField The Sprint field's id, or null when Jira didn't say which it is.
+ * @returns The ticket and the names of its sprints going now, or null when it isn't readable.
+ */
+function readSprintIssue(value: unknown, site: string, sprintField: string | null): { ticket: SprintTicket; activeSprints: string[] } | null {
+  const issue = value as { key?: unknown; fields?: Record<string, unknown> } | null;
+  const fields = issue?.fields;
+  if (!issue || typeof issue.key !== "string" || !fields) {
+    return null;
+  }
+  const status = fields.status as { name?: unknown; statusCategory?: { key?: unknown } } | undefined;
+  const category = status?.statusCategory?.key;
+  const sprints = sprintField && Array.isArray(fields[sprintField]) ? (fields[sprintField] as { name?: unknown; state?: unknown }[]) : [];
+  return {
+    ticket: {
+      key: issue.key,
+      summary: typeof fields.summary === "string" ? fields.summary : issue.key,
+      type: typeof (fields.issuetype as { name?: unknown } | undefined)?.name === "string" ? String((fields.issuetype as { name: string }).name) : "",
+      status: typeof status?.name === "string" ? status.name : "",
+      statusCategory: category === "done" || category === "indeterminate" ? category : "new",
+      url: `${site}/browse/${encodeURIComponent(issue.key)}`,
+    },
+    activeSprints: sprints.flatMap((sprint) => (sprint.state === "active" && typeof sprint.name === "string" ? [sprint.name] : [])),
+  };
 }
 
 /**

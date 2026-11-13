@@ -469,6 +469,30 @@ export interface QbdcodeHandoff {
   worktrees: { path: string; label: string }[];
 }
 
+/** A ticket assigned to you in an open sprint, for the TODO tab. */
+export interface SprintTicket {
+  key: string;
+  summary: string;
+  /** Task, Bug, Story… */
+  type: string;
+  /** The status's own name ("In Testing / Development"). */
+  status: string;
+  /** Jira's group for the status: to do, in progress or done. */
+  statusCategory: "new" | "indeterminate" | "done";
+  /** The ticket's page in Jira. */
+  url: string;
+}
+
+/** Your tickets in the open sprints, or why they couldn't be read. */
+export interface SprintTicketsReport {
+  /** In the board's order, finished ones last. */
+  tickets: SprintTicket[];
+  /** The open sprints they're in, e.g. ["PØD-2026-22"]. */
+  sprints: string[];
+  /** Why the list couldn't be read (Jira not set up, or unreachable); null when it was. */
+  problem: string | null;
+}
+
 /** Someone a Jira ticket can be assigned to. */
 export interface JiraUser {
   accountId: string;
@@ -592,6 +616,7 @@ export const IPC = {
   draftJiraTicket: "jira:draft",
   searchJiraUsers: "jira:users",
   createJiraTicket: "jira:create",
+  getSprintTickets: "jira:sprint-tickets",
   prepareQbdcodeHandoff: "qbdcode:prepare",
   sendToQbdcode: "qbdcode:send",
   nameSpeaker: "speakers:name",
@@ -698,6 +723,8 @@ export interface TimeCenterApi {
   searchJiraUsers(query: string): Promise<JiraUser[]>;
   /** Makes the ticket and returns the list with it recorded on the item. */
   createJiraTicket(todoId: number, draft: JiraDraft): Promise<Todo[]>;
+  /** The Jira tickets assigned to you in the open sprints. */
+  getSprintTickets(): Promise<SprintTicketsReport>;
   /** The instructions and worktrees the QbDCode popup starts with. */
   prepareQbdcodeHandoff(todoId: number): Promise<QbdcodeHandoff>;
   /** Starts a QbDCode chat in a worktree on the instructions, and returns the list with it recorded on the item. */

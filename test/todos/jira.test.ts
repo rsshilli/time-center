@@ -6,6 +6,7 @@ import {
   createJiraTicket,
   jiraActions,
   jiraUnavailable,
+  listMySprintTickets,
   listSprints,
   readJiraSettings,
   saveJiraSettings,
@@ -376,5 +377,79 @@ describe("assertJiraSettingsInput", () => {
     expect(() => assertJiraSettingsInput({ ...INPUT, issueTypes: "Task" })).toThrow(/types of ticket/);
     expect(() => assertJiraSettingsInput({ ...INPUT, token: " " })).toThrow(/API token/);
     expect(() => assertJiraSettingsInput(null)).toThrow(/Not Jira settings/);
+  });
+});
+
+/**
+ * One issue as Jira's search sent it on 2026-11-13, cut down to the fields read.
+ * @param key The ticket.
+ * @param status Its status and status group.
+ * @param sprints Its sprints, as name:state.
+ * @returns The issue.
+ */
+function searchIssue(key: string, status: [string, string], sprints: string[]) {
+  return {
+    key,
+    fields: {
+      summary: `Summary of ${key}`,
+      issuetype: { name: "Task" },
+      status: { name: status[0], statusCategory: { key: status[1] } },
+      customfield_10010: sprints.map((sprint) => ({ name: sprint.split(":")[0], state: sprint.split(":")[1] })),
+    },
+  };
+}
+
+describe("listMySprintTickets", () => {
+  it("should list your tickets in the open sprints in the board's order, finished ones last, with the sprints named", async () => {
+    const stores = fakeStores();
+    stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
+    stores.rawSecrets.set(JIRA_KEYS.token, "t");
+    const { fetchJira, calls } = fakeFetch({
+      "GET /rest/api/3/field": { body: [{ id: "summary", schema: {} }, { id: "customfield_10010", schema: { custom: "com.pyxis.greenhopper.jira:gh-sprint" } }] },
+      "GET /rest/api/3/search/jql": {
+        body: {
+          isLast: true,
+          issues: [
+            searchIssue("QI-15897", ["Done", "done"], ["PØD-2026-22:active", "PØD-2026-21:closed"]),
+            searchIssue("QI-15698", ["In Testing / Development", "indeterminate"], ["PØD-2026-22:active", "PØD-2026-21:closed"]),
+            searchIssue("QI-16579", ["Backlog", "new"], ["PØD-2026-22:active"]),
+            { key: 7 },
+          ],
+        },
+      },
+    });
+
+    const report = await listMySprintTickets({ ...stores, fetch: fetchJira });
+
+    expect(report.problem).toBeNull();
+    expect(report.sprints).toEqual(["PØD-2026-22"]);
+    expect(report.tickets.map((ticket) => [ticket.key, ticket.statusCategory])).toEqual([
+      ["QI-15698", "indeterminate"],
+      ["QI-16579", "new"],
+      ["QI-15897", "done"],
+    ]);
+    expect(report.tickets[0]).toEqual({
+      key: "QI-15698",
+      summary: "Summary of QI-15698",
+      type: "Task",
+      status: "In Testing / Development",
+      statusCategory: "indeterminate",
+      // No site saved, so the default (QbDVision's) is used.
+      url: "https://cherrycircle.atlassian.net/browse/QI-15698",
+    });
+    const search = new URL(calls[1].url).searchParams;
+    expect(search.get("jql")).toBe("assignee = currentUser() AND sprint in openSprints() ORDER BY Rank ASC");
+    expect(search.get("fields")).toBe("summary,status,issuetype,customfield_10010");
+  });
+
+  it("should say why instead of failing when Jira isn't set up or refuses", async () => {
+    const empty = fakeStores();
+    expect(await listMySprintTickets({ ...empty, fetch: fakeFetch({}).fetchJira })).toEqual({ tickets: [], sprints: [], problem: "Set up Jira in Settings first." });
+
+    const stores = fakeStores();
+    stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
+    stores.rawSecrets.set(JIRA_KEYS.token, "t");
+    const refused = fakeFetch({ "GET /rest/api/3/field": { status: 401, body: {} } });
+    expect((await listMySprintTickets({ ...stores, fetch: refused.fetchJira })).problem).toMatch(/didn't accept/);
   });
 });

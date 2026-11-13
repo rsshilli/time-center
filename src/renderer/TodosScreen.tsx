@@ -1,5 +1,5 @@
 import type { Editor } from "@tiptap/react";
-import { type DragEvent, useEffect, useRef, useState } from "react";
+import { type DragEvent, Fragment, useEffect, useRef, useState } from "react";
 import {
   COWORK_URL,
   TODO_SECTIONS,
@@ -13,6 +13,7 @@ import {
 import { readableError } from "./CalendarSettings";
 import { JiraDialog } from "./JiraDialog";
 import { QbdcodeDialog } from "./QbdcodeDialog";
+import { SprintTickets } from "./SprintTickets";
 import { TodoEditor } from "./TodoEditor";
 import { hasWords, moveTodo, stepProgress } from "./todoOrder";
 
@@ -26,7 +27,7 @@ interface TodosScreenProps {
 const SECTION_NAMES: Record<TodoSection, string> = { work: "Work", personal: "Personal" };
 
 /**
- * The TODO list: a Work and a Personal section, each with a box to add an item at its top and its items
+ * The TODO list: a Work and a Personal section (with your sprint's Jira tickets between them), each with a box to add an item at its top and its items
  * still to do (tick, edit in place, drag ⋮⋮ to reorder or into the other section, ⋯ for more, such as making
  * a Jira ticket), and the done items of both folded away below.
  */
@@ -154,25 +155,28 @@ function TodoBoard({ todos, ...rest }: RowProps & { todos: Todo[] }) {
       }}
     >
       {TODO_SECTIONS.map((section) => (
-        <TodoSectionView
-          key={section}
-          section={section}
-          todos={todos.filter((todo) => todo.section === section)}
-          {...rest}
-          active={dragging !== null}
-          dropping={dragging !== null && over?.section === section && over.target === null}
-          onOver={(atTop) => setOver(sectionSpot(section, atTop))}
-          onDrop={(atTop) => drop(sectionSpot(section, atTop))}
-          dragFor={(todo) => ({
-            active: dragging !== null,
-            dragging: dragging === todo.id,
-            over: dragging !== null && over?.target === todo.id && dragging !== todo.id,
-            onStart: () => setDragging(todo.id),
-            onOver: () => setOver({ section, target: todo.id }),
-            onDrop: () => drop({ section, target: todo.id }),
-            onEnd: endDrag,
-          })}
-        />
+        <Fragment key={section}>
+          {/* Your sprint's Jira tickets sit between Work and Personal; they're read from Jira, not dragged. */}
+          {section === "personal" && <SprintTickets />}
+          <TodoSectionView
+            section={section}
+            todos={todos.filter((todo) => todo.section === section)}
+            {...rest}
+            active={dragging !== null}
+            dropping={dragging !== null && over?.section === section && over.target === null}
+            onOver={(atTop) => setOver(sectionSpot(section, atTop))}
+            onDrop={(atTop) => drop(sectionSpot(section, atTop))}
+            dragFor={(todo) => ({
+              active: dragging !== null,
+              dragging: dragging === todo.id,
+              over: dragging !== null && over?.target === todo.id && dragging !== todo.id,
+              onStart: () => setDragging(todo.id),
+              onOver: () => setOver({ section, target: todo.id }),
+              onDrop: () => drop({ section, target: todo.id }),
+              onEnd: endDrag,
+            })}
+          />
+        </Fragment>
       ))}
     </div>
   );
