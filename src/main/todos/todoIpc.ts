@@ -4,6 +4,7 @@ import {
   type JiraDraftResult,
   type JiraUser,
   type SprintTicketsReport,
+  type TicketMove,
   MAX_TODO_CHARS,
   type QbdcodeHandoff,
   type TodoDialog,
@@ -51,6 +52,10 @@ export interface TodoIpcDependencies {
   createJiraTicket(todo: Todo, draft: unknown): Promise<Omit<TodoSent, "at">>;
   /** Your Jira tickets in the open sprints. */
   getSprintTickets(): Promise<SprintTicketsReport>;
+  /** The states a ticket can be moved to. */
+  listTicketMoves(key: unknown): Promise<TicketMove[]>;
+  /** Moves a ticket; answers with your sprint list after. */
+  moveTicket(key: unknown, moveId: unknown): Promise<SprintTicketsReport>;
   /** The instructions and worktrees the QbDCode popup starts with. */
   prepareQbdcodeHandoff(todo: Todo): QbdcodeHandoff;
   /** Starts the QbDCode chat; returns where it went. */
@@ -109,6 +114,8 @@ export function registerTodoIpc(deps: TodoIpcDependencies): void {
     return list();
   });
   ipcMain.handle(IPC.getSprintTickets, () => deps.getSprintTickets());
+  ipcMain.handle(IPC.listTicketMoves, (_event, key: unknown) => deps.listTicketMoves(key));
+  ipcMain.handle(IPC.moveTicket, (_event, key: unknown, moveId: unknown) => deps.moveTicket(key, moveId));
   ipcMain.handle(IPC.prepareQbdcodeHandoff,(_event, id: unknown) => deps.prepareQbdcodeHandoff(openTodo(deps.store, assertRowId(id))));
   ipcMain.handle(IPC.sendToQbdcode, async (_event, id: unknown, path: unknown, text: unknown) => {
     await recordSent(deps, assertRowId(id), "qbdcode", () => deps.sendToQbdcode(path, text));

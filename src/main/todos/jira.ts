@@ -8,6 +8,7 @@ import {
   MAX_JIRA_SUMMARY_CHARS,
   type SprintTicket,
   type SprintTicketsReport,
+  type TicketMove,
   type Todo,
   type TodoSent,
 } from "../../shared/ipc";
@@ -63,6 +64,12 @@ const SPRINT_FIELD_TYPE = "com.pyxis.greenhopper.jira:gh-sprint";
 
 /** The most of your sprint tickets the TODO tab lists; one page of Jira's search. */
 const MAX_SPRINT_TICKETS = 100;
+
+/** Statuses whose tickets are left off the TODO tab's list: the work is merged or released, nothing left for you. */
+export const HIDDEN_STATUSES = ["Merged to Master", "Released to Standard", "Released to Validated"];
+
+/** A Jira ticket key, e.g. "QI-16807". */
+const TICKET_KEY = /^[A-Z][A-Z0-9_]*-\d+$/;
 
 /** The most pages of boards or sprints read; at 50 a page, far more than a project has. */
 const MAX_AGILE_PAGES = 10;
@@ -451,7 +458,7 @@ export async function listMySprintTickets(deps: JiraDependencies): Promise<Sprin
     const fields = (await jiraRequest(deps.fetch, config, "GET", "/rest/api/3/field")) as { id?: unknown; schema?: { custom?: unknown } }[];
     const sprintField = Array.isArray(fields) ? fields.find((field) => field.schema?.custom === SPRINT_FIELD_TYPE)?.id : undefined;
     const params = new URLSearchParams({
-      jql: "assignee = currentUser() AND sprint in openSprints() ORDER BY Rank ASC",
+      jql: `assignee = currentUser() AND sprint in openSprints() AND status NOT IN (${HIDDEN_STATUSES.map((name) => `"${name}"`).join(", ")}) ORDER BY Rank ASC`,
       fields: ["summary", "status", "issuetype", ...(typeof sprintField === "string" ? [sprintField] : [])].join(","),
       maxResults: String(MAX_SPRINT_TICKETS),
     });
@@ -465,6 +472,58 @@ export async function listMySprintTickets(deps: JiraDependencies): Promise<Sprin
   } catch (error) {
     return { tickets: [], sprints: [], problem: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * The states a ticket can be moved to from where it is now, as Jira's workflow allows. Each state is offered once
+ * (two moves can lead to the same one), and the ticket's own state isn't.
+ * @param deps The saved settings and fetch.
+ * @param key The ticket, e.g. "QI-16807".
+ * @returns The moves, in Jira's order.
+ */
+export async function listTicketMoves(deps: JiraDependencies, key: unknown): Promise<TicketMove[]> {
+  const ticket = assertTicketKey(key);
+  const reply = (await jiraRequest(deps.fetch, savedConfig(deps), "GET", `/rest/api/3/issue/${ticket}/transitions`)) as { transitions?: unknown[] };
+  const moves: TicketMove[] = [];
+  for (const raw of reply.transitions ?? []) {
+    const transition = raw as { id?: unknown; to?: { name?: unknown; statusCategory?: { key?: unknown } } } | null;
+    const status = transition?.to?.name;
+    const category = transition?.to?.statusCategory?.key;
+    if (typeof transition?.id !== "string" || typeof status !== "string" || moves.some((move) => move.status === status)) {
+      continue;
+    }
+    moves.push({ id: transition.id, status, statusCategory: category === "done" || category === "indeterminate" ? category : "new" });
+  }
+  return moves;
+}
+
+/**
+ * Moves a ticket to another state, then reads your sprint list again so the tab shows it where it is now (or not
+ * at all, once it's merged or released).
+ * @param deps The saved settings and fetch.
+ * @param key The ticket.
+ * @param moveId The move, one of those listTicketMoves offered.
+ * @returns The list after the move.
+ */
+export async function moveTicket(deps: JiraDependencies, key: unknown, moveId: unknown): Promise<SprintTicketsReport> {
+  const ticket = assertTicketKey(key);
+  if (typeof moveId !== "string" || !/^\d+$/.test(moveId)) {
+    throw new Error("Not a state this ticket can move to.");
+  }
+  await jiraRequest(deps.fetch, savedConfig(deps), "POST", `/rest/api/3/issue/${ticket}/transitions`, { transition: { id: moveId } });
+  return listMySprintTickets(deps);
+}
+
+/**
+ * Checks a ticket key sent by the window.
+ * @param value What it sent.
+ * @returns The key.
+ */
+function assertTicketKey(value: unknown): string {
+  if (typeof value !== "string" || !TICKET_KEY.test(value)) {
+    throw new Error("Not a Jira ticket.");
+  }
+  return value;
 }
 
 /**

@@ -483,6 +483,15 @@ export interface SprintTicket {
   url: string;
 }
 
+/** A state a ticket can be moved to from where it is. */
+export interface TicketMove {
+  /** Jira's id for the move (its "transition"). */
+  id: string;
+  /** The state it leads to, e.g. "In Testing / Development". */
+  status: string;
+  statusCategory: SprintTicket["statusCategory"];
+}
+
 /** Your tickets in the open sprints, or why they couldn't be read. */
 export interface SprintTicketsReport {
   /** In the board's order, finished ones last. */
@@ -617,6 +626,8 @@ export const IPC = {
   searchJiraUsers: "jira:users",
   createJiraTicket: "jira:create",
   getSprintTickets: "jira:sprint-tickets",
+  listTicketMoves: "jira:ticket-moves",
+  moveTicket: "jira:move-ticket",
   prepareQbdcodeHandoff: "qbdcode:prepare",
   sendToQbdcode: "qbdcode:send",
   nameSpeaker: "speakers:name",
@@ -725,6 +736,10 @@ export interface TimeCenterApi {
   createJiraTicket(todoId: number, draft: JiraDraft): Promise<Todo[]>;
   /** The Jira tickets assigned to you in the open sprints. */
   getSprintTickets(): Promise<SprintTicketsReport>;
+  /** The states a ticket can be moved to from where it is. */
+  listTicketMoves(key: string): Promise<TicketMove[]>;
+  /** Moves a ticket to another state and returns your sprint list as it is then. */
+  moveTicket(key: string, moveId: string): Promise<SprintTicketsReport>;
   /** The instructions and worktrees the QbDCode popup starts with. */
   prepareQbdcodeHandoff(todoId: number): Promise<QbdcodeHandoff>;
   /** Starts a QbDCode chat in a worktree on the instructions, and returns the list with it recorded on the item. */

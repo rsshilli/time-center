@@ -1647,7 +1647,7 @@ button.link.todo-source {
 
 .sprint-ticket {
   display: grid;
-  grid-template-columns: 76px 1fr auto;
+  grid-template-columns: 1fr auto;
   gap: 10px;
   align-items: baseline;
   padding: 6px 10px;
@@ -1655,13 +1655,19 @@ button.link.todo-source {
   border-radius: 10px;
 }
 
-.sprint-ticket a {
-  font-weight: 600;
-  white-space: nowrap;
+/* The number in a fixed-width slot with the summary's wrapped lines hanging beside it. */
+.sprint-ticket-title {
+  min-width: 0;
+  padding-left: 86px;
+  text-indent: -86px;
 }
 
-.sprint-ticket-summary {
-  min-width: 0;
+.sprint-ticket-title a {
+  display: inline-block;
+  width: 82px;
+  text-indent: 0;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .sprint-ticket.done {
@@ -1680,6 +1686,76 @@ button.link.todo-source {
 .sprint-status.doing {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+button.sprint-status {
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.sprint-status.doing {
+  color: var(--accent);
+}
+
+/* The menu of states a ticket can move to, opened from its status. */
+.sprint-status-picker {
+  position: relative;
+  justify-self: end;
+}
+
+.sprint-status-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 4px;
+  background: var(--panel, var(--bg));
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.15);
+}
+
+.sprint-status-menu > span {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.sprint-status-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sprint-status-menu button:hover {
+  background: var(--line);
+}
+
+.sprint-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line);
+  flex: none;
+}
+
+.sprint-dot.doing {
+  background: var(--accent);
+}
+
+.sprint-dot.done {
+  background: #2e9e5b;
 }
 
 .todo-section-tag {

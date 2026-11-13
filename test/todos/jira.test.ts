@@ -8,6 +8,8 @@ import {
   jiraUnavailable,
   listMySprintTickets,
   listSprints,
+  listTicketMoves,
+  moveTicket,
   readJiraSettings,
   saveJiraSettings,
 } from "../../src/main/todos/jira";
@@ -54,7 +56,8 @@ function fakeFetch(answers: Record<string, { status?: number; body: unknown }>) 
     if (!answer) {
       return new Response(JSON.stringify({ errorMessages: [`no fake for ${path}`] }), { status: 404 });
     }
-    return new Response(JSON.stringify(answer.body), { status: answer.status ?? 200 });
+    // A 204 (what Jira sends after a move) has no body at all.
+    return new Response(answer.status === 204 ? null : JSON.stringify(answer.body), { status: answer.status ?? 200 });
   }) as unknown as typeof fetch;
   return { fetchJira, calls };
 }
@@ -438,8 +441,48 @@ describe("listMySprintTickets", () => {
       url: "https://cherrycircle.atlassian.net/browse/QI-15698",
     });
     const search = new URL(calls[1].url).searchParams;
-    expect(search.get("jql")).toBe("assignee = currentUser() AND sprint in openSprints() ORDER BY Rank ASC");
+    expect(search.get("jql")).toBe(
+      'assignee = currentUser() AND sprint in openSprints() AND status NOT IN ("Merged to Master", "Released to Standard", "Released to Validated") ORDER BY Rank ASC',
+    );
     expect(search.get("fields")).toBe("summary,status,issuetype,customfield_10010");
+  });
+
+  it("should offer each state a ticket can move to once, then move it and read the list again", async () => {
+    const stores = fakeStores();
+    stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
+    stores.rawSecrets.set(JIRA_KEYS.token, "t");
+    // Cut down from QI-16807's real transitions on 2026-11-13.
+    const move = (id: string, to: string, category: string) => ({ id, name: to, to: { name: to, statusCategory: { key: category } } });
+    const { fetchJira, calls } = fakeFetch({
+      "GET /rest/api/3/issue/QI-16807/transitions": {
+        body: { transitions: [move("51", "Backlog", "new"), move("31", "In Testing / Development", "indeterminate"), move("71", "Final Signoff", "done"), move("181", "Backlog", "new"), { id: 9 }] },
+      },
+      "POST /rest/api/3/issue/QI-16807/transitions": { status: 204, body: "" },
+      "GET /rest/api/3/field": { body: [] },
+      "GET /rest/api/3/search/jql": { body: { issues: [] } },
+    });
+    const deps = { ...stores, fetch: fetchJira };
+
+    expect(await listTicketMoves(deps, "QI-16807")).toEqual([
+      { id: "51", status: "Backlog", statusCategory: "new" },
+      { id: "31", status: "In Testing / Development", statusCategory: "indeterminate" },
+      { id: "71", status: "Final Signoff", statusCategory: "done" },
+    ]);
+    expect((await moveTicket(deps, "QI-16807", "31")).problem).toBeNull();
+    const posted = calls.find((call) => call.init.method === "POST");
+    expect(JSON.parse(String(posted?.init.body))).toEqual({ transition: { id: "31" } });
+    expect(calls.at(-1)?.url).toContain("/rest/api/3/search/jql");
+  });
+
+  it("should refuse a ticket or move the window didn't get from Jira", async () => {
+    const stores = fakeStores();
+    stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
+    stores.rawSecrets.set(JIRA_KEYS.token, "t");
+    const { fetchJira, calls } = fakeFetch({});
+    const deps = { ...stores, fetch: fetchJira };
+    await expect(listTicketMoves(deps, "../myself")).rejects.toThrow(/Not a Jira ticket/);
+    await expect(moveTicket(deps, "QI-1", "31; drop")).rejects.toThrow(/Not a state/);
+    expect(calls).toHaveLength(0);
   });
 
   it("should say why instead of failing when Jira isn't set up or refuses", async () => {
