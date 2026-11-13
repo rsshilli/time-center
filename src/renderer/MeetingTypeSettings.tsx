@@ -40,7 +40,7 @@ export function MeetingTypeSettings() {
       <p className="lead">
         Claude Haiku, on Amazon Bedrock, sorts each meeting into {Object.values(MEETING_TYPE_LABELS).join(", ")}, from
         its name and who's invited. Only the name and the guests' names and email addresses are sent. It uses the AWS
-        keys your ~/.bashrc exports. Fix a wrong guess on Today; repeats of that meeting keep your pick.
+        keys your ~/.bashrc exports. Fix a wrong guess on My time; repeats of that meeting keep your pick.
       </p>
       <dl className="backup-status">
         <dt>AWS keys</dt>

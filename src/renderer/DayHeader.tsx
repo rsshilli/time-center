@@ -1,13 +1,15 @@
+import type { ReactNode } from "react";
 import { startOfDay, shiftDay } from "./day";
 import { formatDay } from "./format";
 
 /**
- * The day picker at the top of the Today and Recordings tabs: the day's name, arrows for the day before and
+ * The day picker at the top of the My time and Recordings tabs: the day's name, arrows for the day before and
  * after, and a Today button once you've left today. Both tabs share the picked day.
  * @param props.at A moment in the picked day.
  * @param props.onChange Called with a moment in the newly picked day.
+ * @param props.children Anything shown at the right of the header, such as the My time tab's period toggle.
  */
-export function DayHeader({ at, onChange }: { at: number; onChange: (at: number) => void }) {
+export function DayHeader({ at, onChange, children }: { at: number; onChange: (at: number) => void; children?: ReactNode }) {
   const today = startOfDay(Date.now());
   const dayStart = startOfDay(at);
   const isToday = dayStart === today;
@@ -25,6 +27,7 @@ export function DayHeader({ at, onChange }: { at: number; onChange: (at: number)
           Today
         </button>
       )}
+      {children}
     </header>
   );
 }

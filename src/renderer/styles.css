@@ -26,6 +26,8 @@
 html {
   /* Anything scrolled into view lands below the pinned tabs, not under them. */
   scroll-padding-top: 64px;
+  /* Room for the scrollbar is kept on every tab, so a long page doesn't shift everything sideways. */
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -40,20 +42,25 @@ body {
   padding: 0 24px 32px;
 }
 
+/* As wide as the widest page on every tab, so the tabs never move when the page under them changes width. */
 .tabs {
   position: sticky;
   top: 0;
   z-index: 20;
   display: flex;
   gap: 4px;
-  padding: 16px 0 10px;
-  margin-bottom: 10px;
+  max-width: 960px;
+  margin: 0 auto 10px;
+  padding: 16px 24px 10px;
   background: var(--bg);
   box-shadow: 0 1px 0 var(--line);
 }
 
+/* All one width, so the tabs line up the same whichever is open. */
 .tabs a {
-  padding: 6px 14px;
+  flex: 0 0 104px;
+  text-align: center;
+  padding: 6px 0;
   border-radius: 8px;
   color: var(--muted);
   text-decoration: none;
@@ -231,6 +238,89 @@ button:disabled {
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   margin-bottom: 18px;
+}
+
+.summary.four {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* Day / Week / Last 7 days / Month, at the right of the My time header. */
+.period-toggle {
+  display: flex;
+  margin-left: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.period-toggle button {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 12px;
+}
+
+.period-toggle button + button {
+  border-left: 1px solid var(--line);
+}
+
+.period-toggle button.active {
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* A column per day: its hours, a bar as tall as the time worked and split by category, and the day. */
+.day-bars {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.day-bar {
+  display: grid;
+  grid-template-rows: auto 160px auto;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+}
+
+.day-bar:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.day-bar-hours,
+.day-bar-label {
+  /* A line tall even when empty, so a day with no time lines up with the rest. */
+  min-height: 1.4em;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.day-bar-track {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.day-bar-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  width: min(36px, 70%);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.day-bar-stack > span {
+  flex-basis: 0;
+  min-height: 1px;
 }
 
 .stat,

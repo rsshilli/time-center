@@ -1,8 +1,9 @@
 import { ClipboardItem, clipboard, ipcMain, nativeImage } from "electron";
-import { IPC, type BackupSettingsInput, type BackupStatus, type PermissionKind } from "../shared/ipc";
+import { IPC, MAX_RANGE_DAYS, type BackupSettingsInput, type BackupStatus, type PermissionKind } from "../shared/ipc";
 import type { ActivityStore } from "./activity/ActivityStore";
 import { assertRules, parseRules } from "./activity/classify";
 import { buildDayReport } from "./activity/dayReport";
+import { buildRangeReport } from "./activity/rangeReport";
 import { IGNORED_APPS_SETTING, assertIgnoredApps, parseIgnoredApps } from "./activity/ignoredApps";
 import { assertNewManualEntry } from "./activity/manualEntries";
 import type { BackupScheduler } from "./backup/BackupScheduler";
@@ -44,6 +45,12 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       deps.calendar.listTypedEvents(from, to),
     ),
   );
+  ipcMain.handle(IPC.getRange, (_event, from: unknown, to: unknown) => {
+    const range = assertRange(from, to);
+    return buildRangeReport(deps.activity, parseRules(deps.store.getSetting(RULES_SETTING)), range.from, range.to, (start, end) =>
+      deps.calendar.listTypedEvents(start, end),
+    );
+  });
   ipcMain.handle(IPC.addManualEntry, (_event, entry: unknown) => {
     deps.activity.insertManualEntry(assertNewManualEntry(entry));
   });
@@ -106,6 +113,22 @@ export function assertMoment(at: unknown): number {
     throw new Error(`Not a moment in time: ${String(at)}`);
   }
   return at;
+}
+
+/**
+ * Checks that two values from the renderer make a range of days: moments, in order, no more than
+ * MAX_RANGE_DAYS apart (with an hour to spare for a clock change).
+ * @param from The start.
+ * @param to The end.
+ * @returns Both, typed.
+ */
+export function assertRange(from: unknown, to: unknown): { from: number; to: number } {
+  const start = assertMoment(from);
+  const end = assertMoment(to);
+  if (end <= start || end - start > MAX_RANGE_DAYS * 86_400_000 + 3_600_000) {
+    throw new Error(`Not a range of up to ${MAX_RANGE_DAYS} days: ${start} to ${end}`);
+  }
+  return { from: start, to: end };
 }
 
 /**

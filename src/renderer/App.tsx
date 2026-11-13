@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { DashboardScreen } from "./DashboardScreen";
 import { startOfDay } from "./day";
+import type { Period } from "./period";
 import { PermissionsScreen } from "./PermissionsScreen";
 import { RecordingsScreen } from "./RecordingsScreen";
 import { SettingsScreen } from "./SettingsScreen";
@@ -15,11 +16,13 @@ const MIDNIGHT_CHECK_MS = 30_000;
 /**
  * The app window: a tab bar over whichever screen the tray asked for. The screen lives in the URL hash
  * so the main process can open the window straight onto it. The picked day lives here, so a day picked on
- * the Today tab is the one the Recordings tab shows, and back.
+ * the My time tab is the one the Recordings tab shows, and back.
  */
 export function App() {
   const [route, setRoute] = useState<Route>(readRoute());
   const [at, setAt] = useState(() => Date.now());
+  /** How much the My time tab shows; kept here so it stays put while you visit other tabs. */
+  const [period, setPeriod] = useState<Period>("day");
 
   useEffect(() => {
     /** Follows the tab links and the tray's screen switches. */
@@ -43,10 +46,11 @@ export function App() {
 
   const wide = route === "dashboard" || route === "recordings";
   return (
-    <div className={wide ? "app wide" : "app"}>
+    <>
+      {/* Outside the page, which is wider on some tabs, so the tabs stay in the same place on every one. */}
       <nav className="tabs">
         <a className={route === "dashboard" ? "active" : ""} href="#/dashboard">
-          Today
+          My time
         </a>
         <a className={route === "recordings" ? "active" : ""} href="#/recordings">
           Recordings
@@ -61,8 +65,8 @@ export function App() {
           Settings
         </a>
       </nav>
-      <main>
-        {route === "dashboard" && <DashboardScreen at={at} onChangeDay={setAt} />}
+      <main className={wide ? "app wide" : "app"}>
+        {route === "dashboard" && <DashboardScreen at={at} onChangeDay={setAt} period={period} onChangePeriod={setPeriod} />}
         {route === "recordings" && <RecordingsScreen at={at} onChangeDay={setAt} />}
         {route === "todos" && (
           <TodosScreen
@@ -75,7 +79,7 @@ export function App() {
         {route === "permissions" && <PermissionsScreen />}
         {route === "settings" && <SettingsScreen />}
       </main>
-    </div>
+    </>
   );
 }
 

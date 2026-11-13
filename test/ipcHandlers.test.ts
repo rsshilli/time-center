@@ -1,4 +1,16 @@
-import { assertBackupSettingsInput, assertMoment, assertPermissionKind, assertRowId } from "../src/main/ipcHandlers";
+import { assertBackupSettingsInput, assertMoment, assertPermissionKind, assertRange, assertRowId } from "../src/main/ipcHandlers";
+
+describe("assertRange", () => {
+  it("should accept up to a month and a day of days in order, and reject anything else from the renderer", () => {
+    const day = 86_400_000;
+    expect(assertRange(0, 7 * day)).toEqual({ from: 0, to: 7 * day });
+    expect(assertRange(0, 32 * day)).toEqual({ from: 0, to: 32 * day });
+    expect(() => assertRange(7 * day, 0)).toThrow(/Not a range/);
+    expect(() => assertRange(0, 0)).toThrow(/Not a range/);
+    expect(() => assertRange(0, 40 * day)).toThrow(/Not a range/);
+    expect(() => assertRange("monday", day)).toThrow(/Not a moment/);
+  });
+});
 
 describe("assertRowId", () => {
   it("should accept a positive whole number and reject anything else from the renderer", () => {

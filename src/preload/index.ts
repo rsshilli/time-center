@@ -7,6 +7,7 @@ import { IPC, type TimeCenterApi } from "../shared/ipc";
  */
 const api: TimeCenterApi = {
   getDay: (at) => ipcRenderer.invoke(IPC.getDay, at),
+  getRange: (from, to) => ipcRenderer.invoke(IPC.getRange, from, to),
   getRules: () => ipcRenderer.invoke(IPC.getRules),
   saveRules: (rules) => ipcRenderer.invoke(IPC.saveRules, rules),
   getIgnoredApps: () => ipcRenderer.invoke(IPC.getIgnoredApps),

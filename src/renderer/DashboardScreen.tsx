@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { screenshotUrl, type DayReport, type ScreenshotInfo, type TimelineItem, type Total } from "../shared/ipc";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import {
+  screenshotUrl,
+  type DayReport,
+  type DayTotals,
+  type RangeReport,
+  type ScreenshotInfo,
+  type TimelineItem,
+  type Total,
+} from "../shared/ipc";
+import { canGoLater, PERIOD_LABELS, periodRange, periodTitle, shiftPeriod, type Period } from "./period";
 import { DayHeader } from "./DayHeader";
 import { startOfDay } from "./day";
 import { colourFor, formatClock, formatDuration } from "./format";
@@ -31,13 +40,74 @@ const STRIP_SLOTS = 10;
 const DRAG_THRESHOLD_PX = 4;
 
 /**
+ * The My time tab: one day, or a longer stretch (a week, the last 7 days, a month), picked with the toggle
+ * at the top.
+ * @param props.at A moment in the picked day, shared with the Recordings tab.
+ * @param props.onChangeDay Called with a moment in the newly picked day.
+ * @param props.period How much to show.
+ * @param props.onChangePeriod Called with the period picked on the toggle.
+ */
+export function DashboardScreen({
+  at,
+  onChangeDay,
+  period,
+  onChangePeriod,
+}: {
+  at: number;
+  onChangeDay: (at: number) => void;
+  period: Period;
+  onChangePeriod: (period: Period) => void;
+}) {
+  const toggle = <PeriodToggle period={period} onChange={onChangePeriod} />;
+  if (period === "day") {
+    return <DayView at={at} onChangeDay={onChangeDay} toggle={toggle} />;
+  }
+  return (
+    <RangeView
+      period={period}
+      at={at}
+      onChangeDay={onChangeDay}
+      toggle={toggle}
+      onOpenDay={(dayStart) => {
+        onChangeDay(dayStart);
+        onChangePeriod("day");
+      }}
+    />
+  );
+}
+
+/**
+ * The buttons for how much of your time to show.
+ * @param props.period The period showing.
+ * @param props.onChange Called with the one picked.
+ */
+function PeriodToggle({ period, onChange }: { period: Period; onChange: (period: Period) => void }) {
+  return (
+    <div className="period-toggle" role="group" aria-label="How much to show">
+      {(Object.keys(PERIOD_LABELS) as Period[]).map((option) => (
+        <button
+          key={option}
+          type="button"
+          className={option === period ? "active" : ""}
+          aria-pressed={option === period}
+          onClick={() => onChange(option)}
+        >
+          {PERIOD_LABELS[option]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
  * One day of your time: how long you worked, were away, or were in an ignored app; a timeline coloured
  * by category that you click to see that moment's screenshots and window; and totals by category, app,
  * project and website.
  * @param props.at A moment in the picked day, shared with the Recordings tab.
  * @param props.onChangeDay Called with a moment in the newly picked day.
+ * @param props.toggle The period toggle, shown in the header.
  */
-export function DashboardScreen({ at, onChangeDay }: { at: number; onChangeDay: (at: number) => void }) {
+function DayView({ at, onChangeDay, toggle }: { at: number; onChangeDay: (at: number) => void; toggle: ReactNode }) {
   const [report, setReport] = useState<DayReport | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   /** The zoomed-in stretch of the timeline, or null for the whole day. */
@@ -126,7 +196,9 @@ export function DashboardScreen({ at, onChangeDay }: { at: number; onChangeDay: 
   if (!report || report.dayStart !== dayStart) {
     return (
       <section className="dashboard">
-        <DayHeader at={at} onChange={onChangeDay} />
+        <DayHeader at={at} onChange={onChangeDay}>
+          {toggle}
+        </DayHeader>
         {error && <p className="error">Couldn't load the day: {error}</p>}
       </section>
     );
@@ -135,7 +207,9 @@ export function DashboardScreen({ at, onChangeDay }: { at: number; onChangeDay: 
 
   return (
     <section className="dashboard">
-      <DayHeader at={at} onChange={onChangeDay} />
+      <DayHeader at={at} onChange={onChangeDay}>
+        {toggle}
+      </DayHeader>
 
       <div className="summary">
         <Stat label="Working" ms={report.activeMs} />
@@ -220,6 +294,152 @@ function Stat({ label, ms }: { label: string; ms: number }) {
     <div className="stat">
       <span className="stat-value">{formatDuration(ms)}</span>
       <span className="stat-label">{label}</span>
+    </div>
+  );
+}
+
+/**
+ * Your time over several days: the totals added up, a bar per day coloured by category, and the same cards
+ * as a day. Re-read every so often while the range includes today.
+ * @param props.period The stretch to show.
+ * @param props.at A moment in the picked day, which places the stretch.
+ * @param props.onChangeDay Called with a moment in the stretch moved to.
+ * @param props.onOpenDay Called with a day's midnight when its bar is clicked.
+ * @param props.toggle The period toggle, shown in the header.
+ */
+function RangeView({
+  period,
+  at,
+  onChangeDay,
+  onOpenDay,
+  toggle,
+}: {
+  period: Exclude<Period, "day">;
+  at: number;
+  onChangeDay: (at: number) => void;
+  onOpenDay: (dayStart: number) => void;
+  toggle: ReactNode;
+}) {
+  const [report, setReport] = useState<RangeReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  /** Counts requests, so a slow answer for a stretch you already left can't replace a newer one. */
+  const latestRequest = useRef(0);
+  const now = Date.now();
+  const { from, to } = periodRange(period, at, now);
+  const includesToday = to > now;
+
+  useEffect(() => {
+    /** Reads the stretch from the main process. */
+    const load = async () => {
+      const request = ++latestRequest.current;
+      try {
+        const range = await window.timeCenter.getRange(from, to);
+        if (request === latestRequest.current) {
+          setReport(range);
+          setError(null);
+        }
+      } catch (caught) {
+        if (request === latestRequest.current) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      }
+    };
+    void load();
+    if (!includesToday) {
+      return undefined;
+    }
+    const timer = setInterval(() => void load(), REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [from, to, includesToday]);
+
+  const isCurrent = !canGoLater(period, at, now);
+  const workedDays = report?.days.filter((day) => day.activeMs > 0).length ?? 0;
+  return (
+    <section className="dashboard">
+      <header className="day-header">
+        <button className="secondary" onClick={() => onChangeDay(shiftPeriod(period, at, -1, now))} aria-label="Earlier">
+          ‹
+        </button>
+        <h1>{periodTitle(period, at, now)}</h1>
+        <button className="secondary" onClick={() => onChangeDay(shiftPeriod(period, at, 1, now))} disabled={isCurrent} aria-label="Later">
+          ›
+        </button>
+        {!isCurrent && (
+          <button className="secondary" onClick={() => onChangeDay(now)}>
+            Now
+          </button>
+        )}
+        {toggle}
+      </header>
+      {error && <p className="error">Couldn't load your time: {error}</p>}
+      {report && report.from === from && (
+        <>
+          <div className="summary four">
+            <Stat label="Working" ms={report.activeMs} />
+            <Stat label={`Average over ${workedDays} working ${workedDays === 1 ? "day" : "days"}`} ms={workedDays ? report.activeMs / workedDays : 0} />
+            <Stat label="Away" ms={report.idleMs} />
+            <Stat label="Untracked (ignored apps)" ms={report.untrackedMs} />
+          </div>
+          {report.activeMs === 0 ? (
+            <p className="lead">Nothing was recorded in this stretch.</p>
+          ) : (
+            <>
+              <DayBars days={report.days} wide={period === "month"} onOpenDay={onOpenDay} />
+              <div className="totals">
+                <TotalsCard title="Categories" totals={report.byCategory} coloured />
+                <TotalsCard title="Apps" totals={report.byApp} />
+                <TotalsCard title="Projects" totals={report.byProject} empty="No WebStorm projects" />
+                <TotalsCard title="Websites" totals={report.byDomain} empty="No Chrome tabs" />
+                <TotalsCard title="Meetings" totals={report.byMeeting} empty="No meetings you were in" />
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * A bar per day, as tall as the time you worked that day and split by category, with the hours above and the
+ * day below. Clicking one opens that day.
+ * @param props.days The days, earliest first.
+ * @param props.wide Whether there are a month's worth, so each label is just the date.
+ * @param props.onOpenDay Called with the clicked day's midnight.
+ */
+function DayBars({ days, wide, onOpenDay }: { days: DayTotals[]; wide: boolean; onOpenDay: (dayStart: number) => void }) {
+  const longest = Math.max(...days.map((day) => day.activeMs), 1);
+  return (
+    <div className="card day-bars" style={{ gridTemplateColumns: `repeat(${days.length}, 1fr)` }}>
+      {days.map((day) => {
+        const date = new Date(day.dayStart);
+        const name = date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+        return (
+          <button
+            key={day.dayStart}
+            type="button"
+            className="day-bar"
+            title={`${name}: ${formatDuration(day.activeMs)} working. Click to open the day.`}
+            onClick={() => onOpenDay(day.dayStart)}
+          >
+            <span className="day-bar-hours">{day.activeMs > 0 && !wide ? formatDuration(day.activeMs) : ""}</span>
+            <span className="day-bar-track">
+              <span className="day-bar-stack" style={{ height: `${(day.activeMs / longest) * 100}%` }}>
+                {day.byCategory.map((total) => (
+                  <span
+                    key={total.name}
+                    style={{ flexGrow: total.ms, background: colourFor(total.name) }}
+                    title={`${total.name}: ${formatDuration(total.ms)}`}
+                  />
+                ))}
+              </span>
+            </span>
+            <span className="day-bar-label">
+              {wide ? date.getDate() : date.toLocaleDateString(undefined, { weekday: "short", day: "numeric" })}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

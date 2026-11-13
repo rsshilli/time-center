@@ -322,6 +322,35 @@ export interface DayReport {
   allMeetings: DayMeeting[];
 }
 
+/** One day inside a longer stretch: its working time, split by category, for its bar. */
+export interface DayTotals {
+  dayStart: number;
+  activeMs: number;
+  byCategory: Total[];
+}
+
+/** Your time over several days (a week so far, the last 7 days, a month): the day report's totals, added up. */
+export interface RangeReport {
+  /** Local midnight that starts the first day. */
+  from: number;
+  /** Local midnight after the last day. */
+  to: number;
+  /** One per day, earliest first. */
+  days: DayTotals[];
+  activeMs: number;
+  idleMs: number;
+  untrackedMs: number;
+  byCategory: Total[];
+  byApp: Total[];
+  byProject: Total[];
+  byDomain: Total[];
+  /** Time in each meeting you attended, by its title, so a weekly meeting adds up across its repeats. */
+  byMeeting: Total[];
+}
+
+/** The most days one range report covers: a 31-day month and a day to spare. */
+export const MAX_RANGE_DAYS = 32;
+
 /** The meeting services the app can join. */
 export type MeetingProvider = "meet" | "zoom" | "teams";
 
@@ -581,6 +610,7 @@ export const MAX_TODO_CHARS = 20_000;
 /** IPC channel names shared by the main process and the preload bridge. */
 export const IPC = {
   getDay: "activity:get-day",
+  getRange: "activity:get-range",
   getRules: "rules:get",
   saveRules: "rules:save",
   getIgnoredApps: "ignored-apps:get",
@@ -641,6 +671,8 @@ export const IPC = {
 export interface TimeCenterApi {
   /** The timeline, screenshots and totals for the local day that contains this moment. */
   getDay(at: number): Promise<DayReport>;
+  /** The totals for the local days from one midnight up to another, at most MAX_RANGE_DAYS of them. */
+  getRange(from: number, to: number): Promise<RangeReport>;
   /** The category rules, in the order they are tried. */
   getRules(): Promise<CategoryRule[]>;
   /** Replaces the category rules. They apply to past days too, since categories are worked out on read. */

@@ -9,7 +9,7 @@ your own S3 bucket, meeting titles sent to Claude to sort them into types, the t
 you ask Claude a question about, the transcript of a call you're watching live on the Recordings tab,
 which Claude reads for action items, and a TODO you choose to make into a Jira ticket.
 
-![The Today tab: a timeline of the day by app, and time per category, app, project, website and meeting](docs/screenshots/today.png)
+![The My time tab: a timeline of the day by app, and time per category, app, project, website and meeting](docs/screenshots/today.png)
 
 ![The Recordings tab: questions about calls answered by Claude, and a call's transcript](docs/screenshots/recordings.png)
 
@@ -17,9 +17,11 @@ which Claude reads for action items, and a TODO you choose to make into a Jira t
 
 ## What it does
 
-- **Today tab.** A timeline of the day, with each stretch of time labelled by app, website or window and
+- **My time tab.** A timeline of the day, with each stretch of time labelled by app, website or window and
   sorted into categories such as "Code review" or "Email". Click any stretch to see the screenshot taken
   then. To add time the Mac couldn't see, such as a call on your phone or a drive, drag across the timeline.
+  Switch from Day to Week (Monday on, so far), Last 7 days or Month to see the totals added up, with a bar
+  per day split by category; click a bar to open that day.
 - **Joins meetings.** It reads your Google Calendar and opens each meeting 30 seconds before it starts.
   Zoom meetings open in the Zoom app; Google Meet and Teams open in Chrome, where you click Join. If you'd
   rather not have meetings opened for you, set **Settings → Meetings → When a meeting starts** to "Just
@@ -35,7 +37,7 @@ which Claude reads for action items, and a TODO you choose to make into a Jira t
   is named after each of them, with a heading in the transcript where each starts. Which meeting you were in
   comes from the calendar and the window in front: a Meet tab or Teams window that names the meeting wins. Zoom's
   windows don't name the meeting, so for Zoom the calendar decides, and an accepted meeting comes before a
-  "maybe" that overlaps it. Pick a day in either the Today tab or the Recordings tab, and the other tab shows the same day.
+  "maybe" that overlaps it. Pick a day in either the My time tab or the Recordings tab, and the other tab shows the same day.
 - **Action items during a call.** While a call is going, the Recordings tab shows its transcript on the
   left as it's heard and, on the right, the five newest possible action items ("You: send Dana the test
   cards"), found by Claude Haiku. Haiku only reads the call while that tab is open and the window is in
