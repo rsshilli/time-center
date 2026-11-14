@@ -72,7 +72,7 @@ export class TrayController {
         ...(this.showingRecording ? [{ label: "● Recording this call", enabled: false }] : []),
         ...meetingItems,
         { type: "separator" },
-        { label: "Today…", click: () => this.deps.windows.show("dashboard") },
+        { label: "My time…", click: () => this.deps.windows.show("dashboard") },
         { label: "Recordings…", click: () => this.deps.windows.show("recordings") },
         { label: "TODOs…", click: () => this.deps.windows.show("todos") },
         { label: "Settings…", click: () => this.deps.windows.show("settings") },
