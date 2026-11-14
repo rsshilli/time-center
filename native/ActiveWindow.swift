@@ -193,7 +193,10 @@ let notACall = ["ai.krisp", "org.shillington.timecenter"]
 /// Processes with no bundle id that hold the microphone without a call. A ScreenCaptureKit stream's
 /// microphone is captured by macOS's `replayd` on the recorder's behalf (probe 2026-11-06: only replayd was
 /// capturing while native/MeetingRecorder.swift ran); counting it would keep a finished call going for ever.
-let notACallExecutables = ["replayd"]
+/// `corespeechd` is macOS's speech service, which captures the microphone for Dictation and Siri: a 30-minute probe
+/// on 2026-11-14 caught it as the only "call" app in all 214 samples where a call was seen, while the user dictated
+/// chat messages and no call was going (recordings #47–#61 were all dictation or room talk).
+let notACallExecutables = ["replayd", "corespeechd"]
 
 /// The Time Center.app this helper ships inside ("/Applications/Time Center.app/"), or nil when run from
 /// the source tree. Anything running from in there is Time Center itself: dictating a question opens the
