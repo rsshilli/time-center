@@ -1,18 +1,10 @@
 import type { Editor } from "@tiptap/react";
 import { type DragEvent, Fragment, useEffect, useRef, useState } from "react";
-import {
-  COWORK_URL,
-  TODO_SECTIONS,
-  type Todo,
-  type TodoActionInfo,
-  type TodoDialog,
-  type TodoLayout,
-  type TodoSection,
-  type TodoSent,
-} from "../shared/ipc";
+import { TODO_SECTIONS, type Todo, type TodoActionInfo, type TodoDialog, type TodoLayout, type TodoSection } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
 import { JiraDialog } from "./JiraDialog";
 import { QbdcodeDialog } from "./QbdcodeDialog";
+import { sentUrl } from "./sentUrl";
 import { SprintTickets } from "./SprintTickets";
 import { TodoEditor } from "./TodoEditor";
 import { hasWords, moveTodo, stepProgress } from "./todoOrder";
@@ -438,16 +430,16 @@ function TodoRow({ todo, actions, update, onOpenCall, drag, showSection }: RowPr
         )}
       </div>
       {dialog === "jira" && <JiraDialog todo={todo} onClose={() => setDialog(null)} onCreated={(list) => void update(async () => list)} />}
-      {dialog === "qbdcode" && <QbdcodeDialog todo={todo} onClose={() => setDialog(null)} onSent={(list) => void update(async () => list)} />}
+      {dialog === "qbdcode" && (
+        <QbdcodeDialog
+          prepare={() => window.timeCenter.prepareQbdcodeHandoff(todo.id)}
+          send={async (path, text) => {
+            const list = await window.timeCenter.sendToQbdcode(todo.id, path, text);
+            await update(async () => list);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
     </li>
   );
-}
-
-/**
- * Where a "sent to" tag under an item links. Items sent to Cowork before it had a link get the Cowork one too.
- * @param sent Where the item was sent.
- * @returns The link, or null for a plain tag.
- */
-function sentUrl(sent: TodoSent): string | null {
-  return sent.url ?? (sent.action === "cowork" ? COWORK_URL : null);
 }

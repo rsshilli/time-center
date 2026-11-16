@@ -496,7 +496,26 @@ export interface QbdcodeHandoff {
   text: string;
   /** Your qbdvision worktrees, the main checkout first. */
   worktrees: { path: string; label: string }[];
+  /** The worktree picked to start with (one already on a ticket's branch), or null for the first. */
+  preferredPath: string | null;
 }
+
+/** The most Jira tickets sent to Claude at once. */
+export const MAX_HANDOFF_TICKETS = 20;
+
+/** A Jira ticket as handed to Claude: what it is, and its description as plain text. */
+export interface TicketBrief {
+  key: string;
+  summary: string;
+  type: string;
+  status: string;
+  url: string;
+  /** The description as plain text; "" when it has none. */
+  description: string;
+}
+
+/** Where each of your Jira tickets was sent from the TODO tab, newest last, by ticket key. */
+export type TicketSends = Record<string, TodoSent[]>;
 
 /** A ticket assigned to you in an open sprint, for the TODO tab. */
 export interface SprintTicket {
@@ -660,6 +679,10 @@ export const IPC = {
   moveTicket: "jira:move-ticket",
   prepareQbdcodeHandoff: "qbdcode:prepare",
   sendToQbdcode: "qbdcode:send",
+  getTicketSends: "tickets:sends",
+  sendTicketsToCowork: "tickets:cowork",
+  prepareTicketsQbdcode: "tickets:qbdcode-prepare",
+  sendTicketsToQbdcode: "tickets:qbdcode-send",
   nameSpeaker: "speakers:name",
   setLineNotYou: "lines:set-not-you",
   getVoices: "voices:get",
@@ -776,6 +799,14 @@ export interface TimeCenterApi {
   prepareQbdcodeHandoff(todoId: number): Promise<QbdcodeHandoff>;
   /** Starts a QbDCode chat in a worktree on the instructions, and returns the list with it recorded on the item. */
   sendToQbdcode(todoId: number, worktreePath: string, text: string): Promise<Todo[]>;
+  /** Where your Jira tickets were sent from the TODO tab. */
+  getTicketSends(): Promise<TicketSends>;
+  /** Opens a Cowork task in Claude Desktop on Jira tickets, and returns where tickets were sent, this one included. */
+  sendTicketsToCowork(keys: string[]): Promise<TicketSends>;
+  /** The instructions and worktrees the QbDCode popup starts with, for Jira tickets. */
+  prepareTicketsQbdcode(keys: string[]): Promise<QbdcodeHandoff>;
+  /** Starts one QbDCode chat on Jira tickets, and returns where tickets were sent, this one included. */
+  sendTicketsToQbdcode(keys: string[], worktreePath: string, text: string): Promise<TicketSends>;
   /** Says who a call speaker is (their voice is then recognized in other calls), or null for "Speaker N". */
   nameSpeaker(speakerId: number, name: string | null): Promise<void>;
   /**

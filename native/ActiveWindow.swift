@@ -214,8 +214,13 @@ let ownAppBundle: String? = {
 /// (Core Audio's per-process input state, macOS 14+, needs no permission). Browser calls count too:
 /// Chrome's audio helper has no bundle id of its own, and was seen capturing during a real Meet call.
 final class CallDetector {
+    /// The last answer to "is a call site open in Chrome?", and when it was worked out.
+    private var callTabOpen = true
+    private var callTabCheckedAt = Date.distantPast
+
     /// Names the apps on a call right now: each process capturing the microphone that isn't one of those above,
-    /// by bundle id, or by executable name when it has none (Chrome's audio helper). Empty when no call is going.
+    /// by bundle id, or by executable name when it has none (Chrome's audio helper). Chrome only counts while one
+    /// of its tabs is on a call site. Empty when no call is going.
     func callApps() -> [String] {
         let names = capturingProcesses().compactMap { pid -> String? in
             let bundleId = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
@@ -224,10 +229,60 @@ final class CallDetector {
             let isCall = pid != getpid() && !notACall.contains { bundleId == $0 || bundleId.hasPrefix($0 + ".") }
                 && !notACallExecutables.contains(executable)
                 && !(ownAppBundle.map { path.hasPrefix($0) } ?? false)
+                && !(isChromeProcess(bundleId: bundleId, executable: executable) && !chromeHasCallTab())
             return isCall ? (bundleId.isEmpty ? executable : bundleId) : nil
         }
         return Array(Set(names)).sorted()
     }
+
+    /// Says whether any Chrome tab is on a call site, asking Chrome at most every 10 seconds. Voice input on other
+    /// sites holds the microphone too: on 2026-11-14 a voice chat in Google Chat ("muse.ai wants to use your
+    /// microphones") started three recordings. When Chrome won't say (no Automation permission), it counts as a
+    /// call, so a real one is never missed.
+    private func chromeHasCallTab() -> Bool {
+        if Date().timeIntervalSince(callTabCheckedAt) < 10 {
+            return callTabOpen
+        }
+        callTabCheckedAt = Date()
+        callTabOpen = chromeTabUrls().map { urls in urls.contains(where: isCallSite) } ?? true
+        return callTabOpen
+    }
+}
+
+/// Sites where a call happens in the browser. Past browser calls were all on meet.google.com (11/05–11/13).
+let callSiteHosts = ["meet.google.com", "teams.microsoft.com", "teams.live.com", "teams.cloud.microsoft", "zoom.us",
+                     "zoomgov.com", "webex.com", "whereby.com", "chime.aws"]
+
+/// Says whether an address is on a call site, or a subdomain of one ("us02web.zoom.us").
+func isCallSite(_ url: String) -> Bool {
+    guard let host = URL(string: url)?.host?.lowercased() else {
+        return false
+    }
+    return callSiteHosts.contains { host == $0 || host.hasSuffix("." + $0) }
+}
+
+/// Says whether a process is Google Chrome or one of its helpers (the audio helper has no bundle id of its own).
+func isChromeProcess(bundleId: String, executable: String) -> Bool {
+    return bundleId.hasPrefix("com.google.Chrome") || executable.hasPrefix("Google Chrome")
+}
+
+/// Every tab's address in every running copy of Chrome, or nil when Chrome won't say.
+func chromeTabUrls() -> [String]? {
+    var urls: [String] = []
+    for app in NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome") {
+        guard let chrome = SBApplication(processIdentifier: app.processIdentifier) else {
+            return nil
+        }
+        let windows = (chrome.value(forKey: "windows") as? SBElementArray)?.compactMap { $0 as? SBObject } ?? []
+        for window in windows {
+            let tabs = (window.value(forKey: "tabs") as? SBElementArray)?.compactMap { $0 as? SBObject } ?? []
+            urls += tabs.compactMap { $0.value(forKey: "URL") as? String }
+        }
+        if chrome.lastError() != nil {
+            return nil
+        }
+    }
+    return urls
 }
 
 /// The full path of a process's executable; empty if macOS won't say.

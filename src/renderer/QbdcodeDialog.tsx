@@ -1,15 +1,23 @@
 import { useEffect, useState } from "react";
-import type { QbdcodeHandoff, Todo } from "../shared/ipc";
+import type { QbdcodeHandoff } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
 
 /**
- * The popup that hands an item to a new QbDCode chat: the instructions, written from the item and its call and
- * ready to edit, and the qbdvision worktree the chat works in. Nothing starts until "Send".
- * @param props.todo The item.
+ * The popup that hands work to a new QbDCode chat: the instructions, written from a TODO (and its call) or from
+ * Jira tickets and ready to edit, and the qbdvision worktree the chat works in. Nothing starts until "Send".
+ * @param props.prepare Reads the instructions and worktrees to start with; called once when the popup opens.
+ * @param props.send Starts the chat with the worktree and instructions picked, and records where it went.
  * @param props.onClose Closes the popup without sending anything.
- * @param props.onSent Called with the list once the chat is queued and recorded on the item.
  */
-export function QbdcodeDialog({ todo, onClose, onSent }: { todo: Todo; onClose(): void; onSent(todos: Todo[]): void }) {
+export function QbdcodeDialog({
+  prepare,
+  send: startChat,
+  onClose,
+}: {
+  prepare(): Promise<QbdcodeHandoff>;
+  send(path: string, text: string): Promise<void>;
+  onClose(): void;
+}) {
   const [handoff, setHandoff] = useState<QbdcodeHandoff | null>(null);
   const [text, setText] = useState("");
   const [path, setPath] = useState("");
@@ -18,13 +26,12 @@ export function QbdcodeDialog({ todo, onClose, onSent }: { todo: Todo; onClose()
 
   useEffect(() => {
     let current = true;
-    window.timeCenter
-      .prepareQbdcodeHandoff(todo.id)
+    prepare()
       .then((prepared) => {
         if (current) {
           setHandoff(prepared);
           setText(prepared.text);
-          setPath(prepared.worktrees[0]?.path ?? "");
+          setPath(prepared.preferredPath ?? prepared.worktrees[0]?.path ?? "");
         }
       })
       .catch((failure: unknown) => {
@@ -35,7 +42,8 @@ export function QbdcodeDialog({ todo, onClose, onSent }: { todo: Todo; onClose()
     return () => {
       current = false;
     };
-  }, [todo.id]);
+    // Read once per popup: the caller passes a new function each render.
+  }, []);
 
   useEffect(() => {
     /** Esc closes the popup, unless the chat is being started or you're typing in a field (so edits aren't lost). */
@@ -57,7 +65,7 @@ export function QbdcodeDialog({ todo, onClose, onSent }: { todo: Todo; onClose()
     setSending(true);
     setProblem(null);
     try {
-      onSent(await window.timeCenter.sendToQbdcode(todo.id, path, text));
+      await startChat(path, text);
       onClose();
     } catch (failure) {
       setProblem(readableError(failure));

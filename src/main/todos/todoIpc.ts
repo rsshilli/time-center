@@ -18,6 +18,7 @@ import {
   type TodoSource,
 } from "../../shared/ipc";
 import { assertMoment, assertRowId } from "../ipcHandlers";
+import type { TicketHandoffApi } from "./ticketHandoff";
 import type { TodoStore } from "./TodoStore";
 
 /**
@@ -60,6 +61,8 @@ export interface TodoIpcDependencies {
   prepareQbdcodeHandoff(todo: Todo): QbdcodeHandoff;
   /** Starts the QbDCode chat; returns where it went. */
   sendToQbdcode(worktreePath: unknown, text: unknown): Promise<Omit<TodoSent, "at">>;
+  /** Sending your sprint's Jira tickets to Cowork or QbDCode. */
+  tickets: TicketHandoffApi;
   now(): number;
 }
 
@@ -121,6 +124,12 @@ export function registerTodoIpc(deps: TodoIpcDependencies): void {
     await recordSent(deps, assertRowId(id), "qbdcode", () => deps.sendToQbdcode(path, text));
     return list();
   });
+  ipcMain.handle(IPC.getTicketSends, () => deps.tickets.getTicketSends());
+  ipcMain.handle(IPC.sendTicketsToCowork, (_event, keys: unknown) => deps.tickets.sendTicketsToCowork(keys));
+  ipcMain.handle(IPC.prepareTicketsQbdcode, (_event, keys: unknown) => deps.tickets.prepareTicketsQbdcode(keys));
+  ipcMain.handle(IPC.sendTicketsToQbdcode, (_event, keys: unknown, path: unknown, text: unknown) =>
+    deps.tickets.sendTicketsToQbdcode(keys, path, text),
+  );
 }
 
 /**

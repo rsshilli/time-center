@@ -1,4 +1,4 @@
-import type { JiraDraft, Todo } from "../../src/shared/ipc";
+import { type JiraDraft, MAX_HANDOFF_TICKETS, type Todo } from "../../src/shared/ipc";
 import {
   JIRA_KEYS,
   assertJiraDraft,
@@ -11,6 +11,7 @@ import {
   listTicketMoves,
   moveTicket,
   readJiraSettings,
+  readTicketBriefs,
   saveJiraSettings,
 } from "../../src/main/todos/jira";
 
@@ -494,5 +495,45 @@ describe("listMySprintTickets", () => {
     stores.rawSecrets.set(JIRA_KEYS.token, "t");
     const refused = fakeFetch({ "GET /rest/api/3/field": { status: 401, body: {} } });
     expect((await listMySprintTickets({ ...stores, fetch: refused.fetchJira })).problem).toMatch(/didn't accept/);
+  });
+});
+
+describe("readTicketBriefs", () => {
+  it("should read each ticket's summary, type, status and description as text, in the order asked", async () => {
+    const stores = fakeStores();
+    stores.rawSettings.set(JIRA_KEYS.site, SITE);
+    stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
+    stores.rawSecrets.set(JIRA_KEYS.token, "t");
+    const issue = (summary: string, description: unknown) => ({
+      body: { fields: { summary, issuetype: { name: "Bug" }, status: { name: "In Draft" }, description } },
+    });
+    const { fetchJira, calls } = fakeFetch({
+      "GET /rest/api/3/issue/QI-2": issue("Export drops rows", {
+        type: "doc",
+        version: 1,
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Steps to reproduce" }] }],
+      }),
+      "GET /rest/api/3/issue/QI-1": issue("Fix the login", null),
+    });
+
+    const briefs = await readTicketBriefs({ ...stores, fetch: fetchJira }, ["QI-2", "QI-1", "QI-2"]);
+
+    expect(briefs).toEqual([
+      { key: "QI-2", summary: "Export drops rows", type: "Bug", status: "In Draft", url: `${SITE}/browse/QI-2`, description: "Steps to reproduce" },
+      { key: "QI-1", summary: "Fix the login", type: "Bug", status: "In Draft", url: `${SITE}/browse/QI-1`, description: "" },
+    ]);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].url).toContain("fields=summary,issuetype,status,description");
+  });
+
+  it("should refuse anything but a short list of ticket keys before calling Jira", async () => {
+    const { fetchJira, calls } = fakeFetch({});
+    const deps = { ...fakeStores(), fetch: fetchJira };
+
+    await expect(readTicketBriefs(deps, [])).rejects.toThrow(/Pick from 1 to/);
+    await expect(readTicketBriefs(deps, "QI-1")).rejects.toThrow(/Pick from 1 to/);
+    await expect(readTicketBriefs(deps, ["QI-1", "../myself"])).rejects.toThrow(/Not a Jira ticket/);
+    await expect(readTicketBriefs(deps, Array.from({ length: MAX_HANDOFF_TICKETS + 1 }, (_, i) => `QI-${i}`))).rejects.toThrow(/Pick from 1 to/);
+    expect(calls).toHaveLength(0);
   });
 });

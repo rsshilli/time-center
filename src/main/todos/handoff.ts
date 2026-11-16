@@ -97,6 +97,7 @@ export function prepareQbdcodeHandoff(deps: Pick<HandoffDependencies, "home" | "
       path: worktree.path,
       label: `${basename(worktree.path)} (${shortBranch(worktree.branch)})`,
     })),
+    preferredPath: null,
   };
 }
 

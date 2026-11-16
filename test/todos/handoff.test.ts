@@ -244,6 +244,7 @@ describe("handoff", () => {
           { path: repo, label: "qbdvision (main)" },
           { path: join(root, "projects", "qbdvision2"), label: "qbdvision2 (QI-16649)" },
         ],
+        preferredPath: null,
       });
     });
   });

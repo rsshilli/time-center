@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -63,7 +64,7 @@ import { handleScreenshotScheme, registerScreenshotScheme } from "./screenshots/
 import { enableStartAtLoginOnce } from "./startAtLogin";
 import { SecretStore } from "./store/SecretStore";
 import { Store } from "./store/Store";
-import { type HandoffDependencies, handoffActions, prepareQbdcodeHandoff, sendToQbdcode } from "./todos/handoff";
+import { CLAUDE_DESKTOP, type HandoffDependencies, handoffActions, prepareQbdcodeHandoff, sendToQbdcode } from "./todos/handoff";
 import {
   createJiraTicket,
   jiraActions,
@@ -71,10 +72,12 @@ import {
   listTicketMoves,
   moveTicket,
   readJiraSettings,
+  readTicketBriefs,
   saveJiraSettings,
   searchAssignees,
 } from "./todos/jira";
 import { draftJiraTicket } from "./todos/jiraDraft";
+import { ticketHandoff } from "./todos/ticketHandoff";
 import { registerTodoIpc } from "./todos/todoIpc";
 import { TodoStore } from "./todos/TodoStore";
 import { TrayController } from "./TrayController";
@@ -311,6 +314,13 @@ async function main(): Promise<void> {
     moveTicket: (key, moveId) => moveTicket(jira, key, moveId),
     prepareQbdcodeHandoff: (todo) => prepareQbdcodeHandoff(handoff, todo),
     sendToQbdcode: (path, text) => sendToQbdcode(handoff, path, text),
+    tickets: ticketHandoff({
+      handoff,
+      readTickets: (keys) => readTicketBriefs(jira, keys),
+      settings: store,
+      coworkInstalled: () => existsSync(CLAUDE_DESKTOP),
+      now: () => Date.now(),
+    }),
     now: () => Date.now(),
   });
   handleScreenshotScheme(activity);

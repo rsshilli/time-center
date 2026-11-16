@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import type { SprintTicket, SprintTicketsReport, TicketMove } from "../shared/ipc";
+import type { SprintTicket, SprintTicketsReport, TicketMove, TicketSends, TodoActionInfo } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
+import { QbdcodeDialog } from "./QbdcodeDialog";
+import { sentUrl } from "./sentUrl";
 
 /** How often the list is read again from Jira while the TODO tab is open. */
 export const REFRESH_EVERY_MS = 5 * 60_000;
@@ -11,17 +13,27 @@ const STATUS_CLASSES: Record<SprintTicket["statusCategory"], string> = { new: "t
 /**
  * The Jira tickets assigned to you in the sprints going now, read when the tab opens, every five minutes, and on
  * Refresh. Each ticket's number opens it in the browser, and its status is a menu to move it to another state;
- * finished ones sit dimmed at the bottom, and merged or released ones aren't listed.
+ * finished ones sit dimmed at the bottom, and merged or released ones aren't listed. Tick one or more to hand them
+ * to Claude, as a Cowork task or one QbDCode chat; where each was sent shows under it, as on a TODO.
  */
 export function SprintTickets() {
   const [report, setReport] = useState<SprintTicketsReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [sends, setSends] = useState<TicketSends>({});
+  const [actions, setActions] = useState<TodoActionInfo[]>([]);
+  const [sending, setSending] = useState<string | null>(null);
+  const [sendProblem, setSendProblem] = useState<string | null>(null);
+  const [qbdcodeKeys, setQbdcodeKeys] = useState<string[] | null>(null);
 
   /** Reads the list from Jira again. */
   const load = async () => {
     setLoading(true);
     try {
-      setReport(await window.timeCenter.getSprintTickets());
+      const latest = await window.timeCenter.getSprintTickets();
+      setReport(latest);
+      // A ticket that dropped off (merged, say) is unticked, so it doesn't come back ticked later.
+      setPicked((current) => current.filter((key) => latest.tickets.some((ticket) => ticket.key === key)));
     } catch (failure) {
       setReport({ tickets: [], sprints: [], problem: readableError(failure) });
     } finally {
@@ -32,9 +44,41 @@ export function SprintTickets() {
   useEffect(() => {
     void load();
     const timer = setInterval(() => void load(), REFRESH_EVERY_MS);
+    // Where tickets were sent, and whether Claude Desktop and QbDCode are there: the same two a TODO's menu offers.
+    window.timeCenter.getTicketSends().then(setSends, () => undefined);
+    window.timeCenter.getTodoActions().then(setActions, (failure: unknown) =>
+      setSendProblem(`Couldn't check for Claude Desktop and QbDCode: ${readableError(failure)}`),
+    );
     return () => clearInterval(timer);
   }, []);
 
+  // A ticket that drops off the list (moved to Merged to Master, say) can't stay picked.
+  const listed = report?.tickets.map((ticket) => ticket.key) ?? [];
+  const pickedListed = listed.filter((key) => picked.includes(key));
+
+  /**
+   * Ticks or unticks a ticket.
+   * @param key The ticket.
+   * @param on Ticked or not.
+   */
+  const pick = (key: string, on: boolean) => setPicked((current) => (on ? [...current, key] : current.filter((other) => other !== key)));
+
+  /** Opens a Cowork task in Claude Desktop on the picked tickets. */
+  const sendToCowork = async () => {
+    setSending("Opening Claude Cowork");
+    setSendProblem(null);
+    try {
+      setSends(await window.timeCenter.sendTicketsToCowork(pickedListed));
+      setPicked([]);
+    } catch (failure) {
+      setSendProblem(readableError(failure));
+    } finally {
+      setSending(null);
+    }
+  };
+
+  const cowork = actions.find((action) => action.id === "cowork");
+  const qbdcode = actions.find((action) => action.id === "qbdcode");
   const open = report?.tickets.filter((ticket) => ticket.statusCategory !== "done").length ?? 0;
   return (
     <section className="todo-section sprint-tickets" aria-label="Jira: this sprint">
@@ -45,6 +89,52 @@ export function SprintTickets() {
           {loading ? "Reading…" : "Refresh"}
         </button>
       </h2>
+      {(pickedListed.length > 0 || sending || sendProblem) && (
+        <div className="sprint-send-bar" role="toolbar" aria-label="Send the ticked tickets">
+          {pickedListed.length > 0 && (
+            <>
+              <span className="muted">
+                {pickedListed.length} {pickedListed.length === 1 ? "ticket" : "tickets"} ticked
+              </span>
+              <button
+                type="button"
+                className="secondary"
+                disabled={sending !== null || Boolean(cowork?.unavailable)}
+                title={cowork?.unavailable ?? "A new Cowork task in Claude Desktop, with the tickets filled in"}
+                onClick={() => void sendToCowork()}
+              >
+                Start a Claude Cowork task
+              </button>
+              {cowork?.unavailable && <span className="muted">— {cowork.unavailable}</span>}
+              <button
+                type="button"
+                className="secondary"
+                disabled={sending !== null || Boolean(qbdcode?.unavailable)}
+                title={qbdcode?.unavailable ?? "One QbDCode chat on all the ticked tickets"}
+                onClick={() => setQbdcodeKeys(pickedListed)}
+              >
+                Send to QbDCode…
+              </button>
+              {qbdcode?.unavailable && <span className="muted">— {qbdcode.unavailable}</span>}
+              <button type="button" className="link" disabled={sending !== null} onClick={() => setPicked([])}>
+                Clear
+              </button>
+            </>
+          )}
+          {sending && <span className="muted">{sending}…</span>}
+          {sendProblem && <span className="error">{sendProblem}</span>}
+        </div>
+      )}
+      {qbdcodeKeys && (
+        <QbdcodeDialog
+          prepare={() => window.timeCenter.prepareTicketsQbdcode(qbdcodeKeys)}
+          send={async (path, text) => {
+            setSends(await window.timeCenter.sendTicketsToQbdcode(qbdcodeKeys, path, text));
+            setPicked([]);
+          }}
+          onClose={() => setQbdcodeKeys(null)}
+        />
+      )}
       {report === null ? (
         <p className="muted todo-empty">Reading your tickets from Jira…</p>
       ) : report.problem ? (
@@ -55,13 +145,46 @@ export function SprintTickets() {
         <ul className="sprint-ticket-list">
           {report.tickets.map((ticket) => (
             <li key={ticket.key} className={ticket.statusCategory === "done" ? "sprint-ticket done" : "sprint-ticket"}>
-              {/* One run of text, so copying the number and summary gives "QI-123 Summary" on one line. */}
-              <span className="sprint-ticket-title">
-                <a href={ticket.url} target="_blank" rel="noopener noreferrer" title={`Open ${ticket.key} in Jira`}>
-                  {ticket.key}
-                </a>{" "}
-                <span>{ticket.summary}</span>
-              </span>
+              <input
+                type="checkbox"
+                className="sprint-pick"
+                checked={picked.includes(ticket.key)}
+                aria-label={`Tick ${ticket.key} to send it to Claude`}
+                onChange={(event) => pick(ticket.key, event.target.checked)}
+              />
+              <div className="sprint-ticket-main">
+                {/* One run of text, so copying the number and summary gives "QI-123 Summary" on one line. */}
+                <span className="sprint-ticket-title">
+                  <a href={ticket.url} target="_blank" rel="noopener noreferrer" title={`Open ${ticket.key} in Jira`}>
+                    {ticket.key}
+                  </a>{" "}
+                  <span>{ticket.summary}</span>
+                </span>
+                {(sends[ticket.key]?.length ?? 0) > 0 && (
+                  <div className="todo-meta sprint-sent">
+                    {sends[ticket.key].map((sent) => {
+                      const url = sentUrl(sent);
+                      const when = `Sent ${new Date(sent.at).toLocaleString()}`;
+                      return url ? (
+                        <a
+                          key={`${sent.action}-${sent.at}`}
+                          className="todo-sent"
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={sent.action === "cowork" ? `${when}. Opens Cowork in Claude Desktop; the task is in the list down the side.` : when}
+                        >
+                          {sent.label} ↗
+                        </a>
+                      ) : (
+                        <span key={`${sent.action}-${sent.at}`} className="todo-sent" title={when}>
+                          {sent.label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
               {/* Its own cell, outside the title, so it isn't copied with the number and summary. */}
               <span className={`sprint-type ${typeClass(ticket.type)}`}>{ticket.type}</span>
               <StatusPicker ticket={ticket} onMoved={setReport} />

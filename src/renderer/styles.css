@@ -1732,8 +1732,8 @@ button.link.todo-source {
   margin: 0;
   padding: 0;
   display: grid;
-  /* Shared by every row, so the type pills and statuses line up in columns. */
-  grid-template-columns: 1fr auto auto;
+  /* Shared by every row, so the tick boxes, type pills and statuses line up in columns. */
+  grid-template-columns: auto 1fr auto auto;
   gap: 4px 10px;
 }
 
@@ -1747,8 +1747,38 @@ button.link.todo-source {
   border-radius: 10px;
 }
 
+/* Level with the first line of the summary. */
+.sprint-pick {
+  margin: 2px 0 0;
+  align-self: start;
+}
+
+.sprint-ticket-main {
+  min-width: 0;
+}
+
+.sprint-sent {
+  padding-left: 86px;
+  margin-top: 2px;
+}
+
+/* Shown once a ticket is ticked: what can be done with the ticked ones. */
+.sprint-send-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.sprint-send-bar button.secondary {
+  padding: 3px 10px;
+}
+
 /* The number in a fixed-width slot with the summary's wrapped lines hanging beside it. */
 .sprint-ticket-title {
+  display: block;
   min-width: 0;
   padding-left: 86px;
   text-indent: -86px;

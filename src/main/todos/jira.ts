@@ -6,8 +6,10 @@ import {
   type JiraUser,
   MAX_JIRA_DESCRIPTION_CHARS,
   MAX_JIRA_SUMMARY_CHARS,
+  MAX_HANDOFF_TICKETS,
   type SprintTicket,
   type SprintTicketsReport,
+  type TicketBrief,
   type TicketMove,
   type Todo,
   type TodoSent,
@@ -16,6 +18,7 @@ import { withRequiredSections } from "../../shared/jiraSections";
 import { sprintTeam } from "../../shared/jiraSprints";
 import type { SecretStore } from "../store/SecretStore";
 import type { Store } from "../store/Store";
+import { adfToText } from "./adfToText";
 import { type AdfNode, markdownToAdf } from "./markdownToAdf";
 import type { TodoAction } from "./todoIpc";
 
@@ -512,6 +515,45 @@ export async function moveTicket(deps: JiraDependencies, key: unknown, moveId: u
   }
   await jiraRequest(deps.fetch, savedConfig(deps), "POST", `/rest/api/3/issue/${ticket}/transitions`, { transition: { id: moveId } });
   return listMySprintTickets(deps);
+}
+
+/**
+ * Reads tickets from Jira to hand to Claude: each one's summary, type, status, address and description as text.
+ * @param deps The saved settings and fetch.
+ * @param keys The tickets, as the window sent them.
+ * @returns The tickets, in the order asked.
+ */
+export async function readTicketBriefs(deps: JiraDependencies, keys: unknown): Promise<TicketBrief[]> {
+  const tickets = assertTicketKeys(keys);
+  const config = savedConfig(deps);
+  return Promise.all(
+    tickets.map(async (key) => {
+      const issue = (await jiraRequest(deps.fetch, config, "GET", `/rest/api/3/issue/${key}?fields=summary,issuetype,status,description`)) as {
+        fields?: { summary?: unknown; issuetype?: { name?: unknown }; status?: { name?: unknown }; description?: unknown };
+      };
+      const fields = issue.fields ?? {};
+      return {
+        key,
+        summary: typeof fields.summary === "string" ? fields.summary : key,
+        type: typeof fields.issuetype?.name === "string" ? fields.issuetype.name : "",
+        status: typeof fields.status?.name === "string" ? fields.status.name : "",
+        url: `${config.site}/browse/${encodeURIComponent(key)}`,
+        description: adfToText(fields.description),
+      };
+    }),
+  );
+}
+
+/**
+ * Checks a list of ticket keys sent by the window: one to MAX_HANDOFF_TICKETS of them, each once.
+ * @param value What it sent.
+ * @returns The keys.
+ */
+export function assertTicketKeys(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_HANDOFF_TICKETS) {
+    throw new Error(`Pick from 1 to ${MAX_HANDOFF_TICKETS} tickets.`);
+  }
+  return [...new Set(value.map(assertTicketKey))];
 }
 
 /**
