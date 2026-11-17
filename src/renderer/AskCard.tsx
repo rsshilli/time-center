@@ -4,7 +4,9 @@ import { readableError } from "./CalendarSettings";
 import { startOfDay } from "./day";
 import { DictationButton } from "./DictationButton";
 import { formatClock, formatDay } from "./format";
+import { DismissButton } from "./DismissButton";
 import { escapeMarkdown } from "./todoOrder";
+import { suggestionKey, useDismissals } from "./useDismissals";
 
 /** How often the call picker re-reads the day's calls. */
 const CALLS_REFRESH_MS = 15_000;
@@ -321,7 +323,8 @@ function QuestionItem({ item }: { item: CallQuestion }) {
       </p>
       {item.note && <p className="ask-meta">{item.note}</p>}
       {item.answer !== null && <p className="ask-answer">{item.answer}</p>}
-      {item.todos.length > 0 && <FoundTodos item={item} />}
+      {/* Always there, so Undo stays after the last found TODO is dismissed and the questions reload. */}
+      <FoundTodos item={item} />
       {item.error !== null && <p className="error">Couldn't get an answer: {item.error}</p>}
     </li>
   );
@@ -338,21 +341,23 @@ function sourceText(source: CallQuestion["sources"][number]): string {
 }
 
 /**
- * The TODOs Sonnet found while answering, each with an Add to TODOs button that links it to the call it came from.
+ * The TODOs Sonnet found while answering, each with an Add to TODOs button that links it to the call it came from,
+ * and one that dismisses it (with Undo).
  * @param props.item The saved question.
  */
 function FoundTodos({ item }: { item: CallQuestion }) {
-  const [added, setAdded] = useState<Set<number>>(new Set());
+  const [added, setAdded] = useState<Set<string>>(new Set());
   const [problem, setProblem] = useState<string | null>(null);
+  const dismissals = useDismissals(item.todos, (todo) => todo);
 
   /**
    * Adds a found TODO to the list, in Work.
    * @param todo The TODO.
-   * @param index Its place in the list.
+   * @param key Its key in the list.
    */
-  const addToTodos = async (todo: CallQuestionTodo, index: number) => {
+  const addToTodos = async (todo: CallQuestionTodo, key: string) => {
     // Marked straight away, so a double-click adds it once.
-    setAdded((current) => new Set(current).add(index));
+    setAdded((current) => new Set(current).add(key));
     const source = item.sources.find((each) => each.recordingId === todo.recordingId);
     try {
       await window.timeCenter.addTodo({
@@ -364,29 +369,38 @@ function FoundTodos({ item }: { item: CallQuestion }) {
     } catch (error) {
       setAdded((current) => {
         const next = new Set(current);
-        next.delete(index);
+        next.delete(key);
         return next;
       });
       setProblem(readableError(error));
     }
   };
 
+  if (dismissals.shown.length === 0 && dismissals.note === null && problem === null) {
+    return null;
+  }
   return (
     <>
       <ul className="action-items ask-todos">
-        {item.todos.map((todo, index) => (
-          <li key={index}>
-            <span className="action-text">{todo.text}</span>
-            <span className="action-time">
-              {item.sources.length > 1 && `${item.sources.find((each) => each.recordingId === todo.recordingId)?.title ?? "Call"}, `}
-              {formatClock(todo.saidAt)}
-            </span>
-            <button type="button" className="secondary action-add" disabled={added.has(index)} onClick={() => void addToTodos(todo, index)}>
-              {added.has(index) ? "Added ✓" : "Add to TODOs"}
-            </button>
-          </li>
-        ))}
+        {dismissals.shown.map((todo, index) => {
+          // The place is part of the key: Sonnet can list the same TODO twice.
+          const key = `${index}:${suggestionKey(todo)}`;
+          return (
+            <li key={key}>
+              <span className="action-text">{todo.text}</span>
+              <span className="action-time">
+                {item.sources.length > 1 && `${item.sources.find((each) => each.recordingId === todo.recordingId)?.title ?? "Call"}, `}
+                {formatClock(todo.saidAt)}
+              </span>
+              <button type="button" className="secondary action-add" disabled={added.has(key)} onClick={() => void addToTodos(todo, key)}>
+                {added.has(key) ? "Added ✓" : "Add to TODOs"}
+              </button>
+              <DismissButton onClick={() => dismissals.dismiss(todo)} />
+            </li>
+          );
+        })}
       </ul>
+      {dismissals.note}
       {problem && <p className="error">{problem}</p>}
     </>
   );

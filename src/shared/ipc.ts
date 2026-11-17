@@ -237,6 +237,22 @@ export interface ActionItem {
   saidAt: number;
 }
 
+/** How far back "Catch me up" can summarise a call, in minutes. */
+export const CATCH_UP_MINUTES = [2, 5, 10] as const;
+export type CatchUpMinutes = (typeof CATCH_UP_MINUTES)[number];
+
+/** A summary of the last few minutes of a call, for when you stopped paying attention. */
+export interface CatchUp {
+  minutes: CatchUpMinutes;
+  /** The stretch of the call it covers. */
+  from: number;
+  to: number;
+  /** Haiku's short bullet points, or a note that nothing was said. */
+  summary: string;
+  /** How many turns were said in that time; 0 when nothing was, and Haiku wasn't asked. */
+  turns: number;
+}
+
 /** A suggested TODO on the Recordings tab, as it's known when dismissed: its call, when it was said, its words. */
 export interface SuggestionRef {
   recordingId: number;
@@ -678,6 +694,7 @@ export const IPC = {
   getCallQuestions: "recordings:questions",
   transcribeDictation: "recordings:dictate",
   refreshActionItems: "recordings:action-items",
+  catchUpOnCall: "recordings:catch-up",
   dismissSuggestion: "recordings:dismiss-suggestion",
   restoreSuggestion: "recordings:restore-suggestion",
   getTodos: "todos:get",
@@ -780,6 +797,8 @@ export interface TimeCenterApi {
    * reads a call you're watching; it looks again when there are new words and a minute has passed.
    */
   refreshActionItems(recordingId: number): Promise<ActionItemsReport>;
+  /** Summarises the last 2, 5 or 10 minutes of a call with Haiku, for when you stopped paying attention. */
+  catchUpOnCall(recordingId: number, minutes: CatchUpMinutes): Promise<CatchUp>;
   /** Dismisses a suggested TODO on the Recordings tab, so it isn't shown again (nor found again by Haiku). */
   dismissSuggestion(suggestion: SuggestionRef): Promise<void>;
   /** Undoes a dismissal. */

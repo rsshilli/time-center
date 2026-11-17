@@ -49,6 +49,7 @@ import { Transcriber, type TranscriberDeps } from "./recording/Transcriber";
 import { cancelWhisper, prepareWhisper, runWhisper, transcribeSpeech } from "./recording/whisper";
 import { CallQuestionStore } from "./recording/CallQuestionStore";
 import { DismissedSuggestions } from "./recording/DismissedSuggestions";
+import { catchUp } from "./recording/catchUp";
 import { askAboutCalls } from "./recording/callQuestions";
 import { ActionItemStore } from "./recording/ActionItemStore";
 import { ActionItemFinder } from "./recording/actionItems";
@@ -282,6 +283,8 @@ async function main(): Promise<void> {
     },
     actionItems,
     refreshActionItems: (recordingId) => actionItemFinder.refresh(recordingId),
+    catchUp: (recordingId, minutes) =>
+      catchUp({ recordings, haiku: new BedrockHaiku(), speakers: (id) => callSpeakers(speakerStore, id), now: () => Date.now() }, recordingId, minutes),
     dismissed: new DismissedSuggestions(store.db),
     now: () => Date.now(),
   });

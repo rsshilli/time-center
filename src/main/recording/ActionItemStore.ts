@@ -54,22 +54,24 @@ export class ActionItemStore {
   }
 
   /**
-   * A call's action items, without the ones you dismissed.
+   * A call's action items, without the ones you dismissed unless asked for them.
    * @param recordingId The call.
+   * @param includeDismissed Also the dismissed ones, which stay saved so Undo can bring them back.
    * @returns Them, or null if Haiku never looked at it.
    */
-  getItems(recordingId: number): StoredActionItems | null {
+  getItems(recordingId: number, includeDismissed = false): StoredActionItems | null {
     const row = this.db.prepare("SELECT * FROM recording_action_items WHERE recording_id = ?").get(recordingId) as
       | Record<string, unknown>
       | undefined;
     if (!row) {
       return null;
     }
+    const items = parseItems(String(row.items));
     return {
       recordingId,
-      items: this.dismissed
-        .without(parseItems(String(row.items)).map((item) => ({ ...item, recordingId })))
-        .map(({ text, saidAt }) => ({ text, saidAt })),
+      items: includeDismissed
+        ? items
+        : this.dismissed.without(items.map((item) => ({ ...item, recordingId }))).map(({ text, saidAt }) => ({ text, saidAt })),
       coveredUntil: Date.parse(String(row.covered_until)),
       coveredLines: Number(row.covered_lines),
       checkedAt: Date.parse(String(row.checked_at)),

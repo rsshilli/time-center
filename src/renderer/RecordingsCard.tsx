@@ -172,11 +172,8 @@ function RecordingItem({ recording }: { recording: CallRecording }) {
         <div className="recording-body" id={bodyId}>
           <section className="recording-actions-found">
             <h3>Possible TODOs</h3>
-            {recording.actionItems.length > 0 ? (
-              <ActionItemList items={recording.actionItems} recording={recording} />
-            ) : (
-              <p className="muted">None found in this call.</p>
-            )}
+            {/* Always there, even when empty, so Undo stays after the last one is dismissed and the day reloads. */}
+            <ActionItemList items={recording.actionItems} recording={recording} empty="None found in this call." />
           </section>
           <section>
             <h3>Transcript</h3>

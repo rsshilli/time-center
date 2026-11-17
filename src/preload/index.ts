@@ -38,6 +38,7 @@ const api: TimeCenterApi = {
   getCallQuestions: () => ipcRenderer.invoke(IPC.getCallQuestions),
   transcribeDictation: (wav) => ipcRenderer.invoke(IPC.transcribeDictation, wav),
   refreshActionItems: (recordingId) => ipcRenderer.invoke(IPC.refreshActionItems, recordingId),
+  catchUpOnCall: (recordingId, minutes) => ipcRenderer.invoke(IPC.catchUpOnCall, recordingId, minutes),
   dismissSuggestion: (suggestion) => ipcRenderer.invoke(IPC.dismissSuggestion, suggestion),
   restoreSuggestion: (suggestion) => ipcRenderer.invoke(IPC.restoreSuggestion, suggestion),
   getTodos: () => ipcRenderer.invoke(IPC.getTodos),

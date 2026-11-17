@@ -7,8 +7,11 @@ import {
   type CallQuestionRequest,
   type CallQuestionScope,
   type CallRecording,
+  type CatchUp,
+  type CatchUpMinutes,
   type RecordingsReport,
 } from "../../shared/ipc";
+import { assertCatchUpMinutes } from "./catchUp";
 import { localDayBounds } from "../activity/dayReport";
 import type { CalendarEvent } from "../calendar/meetingLinks";
 import { assertMoment, assertRowId } from "../ipcHandlers";
@@ -44,6 +47,8 @@ export interface RecordingIpcDependencies {
   speakers: Pick<SpeakerStore, "listSpeakers" | "listVoices">;
   /** Brings a call's action items up to date with Haiku, when it's time to. */
   refreshActionItems(recordingId: number): Promise<ActionItemsReport>;
+  /** Summarises the last few minutes of a call with Haiku. */
+  catchUp(recordingId: number, minutes: CatchUpMinutes): Promise<CatchUp>;
   /** The suggested TODOs you dismissed. */
   dismissed: Pick<DismissedSuggestions, "dismiss" | "restore">;
   now(): number;
@@ -80,6 +85,7 @@ export function registerRecordingIpc(deps: RecordingIpcDependencies): void {
     }
     return deps.refreshActionItems(assertRowId(id));
   });
+  ipcMain.handle(IPC.catchUpOnCall, (_event, id: unknown, minutes: unknown) => deps.catchUp(assertRowId(id), assertCatchUpMinutes(minutes)));
   ipcMain.handle(IPC.dismissSuggestion, (_event, suggestion: unknown) => deps.dismissed.dismiss(assertSuggestionRef(suggestion), deps.now()));
   ipcMain.handle(IPC.restoreSuggestion, (_event, suggestion: unknown) => deps.dismissed.restore(assertSuggestionRef(suggestion)));
 }

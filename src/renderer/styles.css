@@ -1129,6 +1129,45 @@ button.link.total-name {
   margin: 0 0 8px;
 }
 
+.catch-up {
+  margin: 0 0 10px;
+}
+
+.catch-up-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.catch-up-bar button {
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+.catch-up-summary {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.catch-up-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.catch-up-text {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  line-height: 1.45;
+  user-select: text;
+}
+
 .live-dot {
   color: var(--bad);
 }
@@ -1154,6 +1193,8 @@ button.link.total-name {
   margin-top: 0;
   height: 380px;
   max-height: none;
+  /* A fixed height with few turns would otherwise stretch each row to fill it. */
+  align-content: start;
 }
 
 .live-call p {
@@ -1203,6 +1244,21 @@ button.link.total-name {
 .action-items li:has(.action-add) {
   grid-template-columns: 1fr auto auto;
   align-items: center;
+}
+
+.action-items li:has(.action-dismiss) {
+  grid-template-columns: 1fr auto auto auto;
+}
+
+button.action-dismiss {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 0 2px;
+  text-decoration: none;
+}
+
+button.action-dismiss:hover {
+  color: var(--text);
 }
 
 button.action-add {
@@ -2068,4 +2124,77 @@ button.sprint-status.doing {
 
 .jira-change .ask-input {
   flex: 1;
+}
+
+/*
+ * A narrow window, shrunk beside a meeting: one column, so what's said and the TODOs stay readable. The live
+ * call's transcript sits above its TODOs; each turn puts its time and speaker on a line above the words, and each
+ * TODO puts its time and buttons under its words.
+ */
+@media (max-width: 760px) {
+  .app,
+  .app.wide {
+    padding: 0 10px 20px;
+  }
+
+  .tabs {
+    padding: 10px 10px 8px;
+    gap: 2px;
+  }
+
+  .tabs a {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card {
+    padding: 10px;
+  }
+
+  .live-head {
+    flex-wrap: wrap;
+    gap: 2px 12px;
+  }
+
+  .live-columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .live-transcript .transcript {
+    height: 40vh;
+    min-height: 160px;
+  }
+
+  .turn {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0 8px;
+  }
+
+  .turn-text {
+    grid-column: 1 / -1;
+  }
+
+  .action-items li:has(.action-add),
+  .action-items li:has(.action-dismiss) {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    row-gap: 4px;
+  }
+
+  .action-items li .action-text {
+    grid-column: 1 / -1;
+  }
+
+  .ask-controls {
+    flex-wrap: wrap;
+  }
+
+  .ask-call {
+    min-width: 0;
+    max-width: 100%;
+  }
 }

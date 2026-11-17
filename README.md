@@ -42,7 +42,11 @@ which Claude reads for action items, and a TODO you choose to make into a Jira t
   left as it's heard and, on the right, the five newest possible action items ("You: send Dana the test
   cards"), found by Claude Haiku. Haiku only reads the call while that tab is open and the window is in
   view, at most once a minute, plus a last look in the few minutes after the call ends while its final
-  words are transcribed. The items stay with the call, under it in the list of earlier calls.
+  words are transcribed. The items stay with the call, under it in the list of earlier calls. Click ✕ on any
+  suggested TODO (here, under a call, or found by a question) to dismiss it, with Undo; Haiku won't suggest it
+  again for that call.
+- **Catch me up.** Stopped listening? Above the live call, pick 2, 5 or 10 minutes and Claude Haiku sums up what
+  was said in that time in a few bullets, starting with anything someone asked you.
 - **Ask about your calls.** At the top of the Recordings tab, type a question, or click the mic to say
   it (whisper turns it into text on your Mac). Ask about one call (even one still going), the picked
   day's calls, or all your calls. For all calls, the app searches the transcripts for your question's

@@ -85,7 +85,8 @@ export class ActionItemFinder {
     if (!recording) {
       throw new Error("That call isn't recorded.");
     }
-    const saved = this.deps.store.getItems(recordingId);
+    // Dismissed items included: they stay saved, hidden, so Undo can bring them back after Haiku looks again.
+    const saved = this.deps.store.getItems(recordingId, true);
     const lines = this.deps.recordings.listLines(recordingId);
     const heardUntil = Math.max(0, ...lines.map((line) => line.end));
     const now = this.deps.now();
@@ -103,18 +104,28 @@ export class ActionItemFinder {
     try {
       const speakers = this.deps.speakers(recordingId);
       const turns = latestTurns(groupTurns(lines, speakers), MAX_TRANSCRIPT_CHARS);
+      const dismissed = this.deps.store.listDismissed(recordingId);
+      const shown = (saved?.items ?? []).filter((item) => !isDismissed(item, dismissed));
+      const parked = (saved?.items ?? []).filter((item) => isDismissed(item, dismissed));
       // Items said before the part that was sent can't be re-found, so they're kept as they were, and not
       // shown to Haiku, which would otherwise restate them inside the part it read.
       const cutOff = turns[0]?.start ?? 0;
-      const earlier = (saved?.items ?? []).filter((item) => item.saidAt >= cutOff);
-      const kept = (saved?.items ?? []).filter((item) => item.saidAt < cutOff);
+      const earlier = shown.filter((item) => item.saidAt >= cutOff);
+      const kept = shown.filter((item) => item.saidAt < cutOff);
       // Ones you dismissed are shown to Haiku so it doesn't suggest them again, and left out if it does anyway.
-      const dismissed = this.deps.store.listDismissed(recordingId);
+      // Matched on words alone here: the same words in the same call are the same suggestion, even when Haiku
+      // places it on a neighbouring turn this time.
       const found = readItems(await this.deps.haiku.invoke(buildRequest(turns, earlier, speakers, dismissed)), turns).filter(
         (item) => !dismissed.some((gone) => gone.text === item.text),
       );
       const items = [...found, ...kept.filter((item) => !found.some((match) => match.text === item.text))].slice(0, MAX_ITEMS);
-      const next: StoredActionItems = { recordingId, items, coveredUntil: heardUntil, coveredLines: lines.length, checkedAt: now };
+      const next: StoredActionItems = {
+        recordingId,
+        items: [...items, ...parked],
+        coveredUntil: heardUntil,
+        coveredLines: lines.length,
+        checkedAt: now,
+      };
       this.deps.store.saveItems(next);
       this.problems.delete(recordingId);
       return this.report(recordingId, next);
@@ -125,14 +136,29 @@ export class ActionItemFinder {
   }
 
   /**
-   * Puts a call's items and its last problem together for the tab.
+   * Puts a call's items, less the ones you dismissed, and its last problem together for the tab.
    * @param recordingId The call.
-   * @param saved Its saved items, if any.
+   * @param saved Its saved items, dismissed ones included, if any.
    * @returns The report.
    */
   private report(recordingId: number, saved: StoredActionItems | null): ActionItemsReport {
-    return { items: saved?.items ?? [], checkedAt: saved?.checkedAt ?? null, problem: this.problems.get(recordingId) ?? null };
+    const dismissed = this.deps.store.listDismissed(recordingId);
+    return {
+      items: (saved?.items ?? []).filter((item) => !isDismissed(item, dismissed)),
+      checkedAt: saved?.checkedAt ?? null,
+      problem: this.problems.get(recordingId) ?? null,
+    };
   }
+}
+
+/**
+ * Whether an action item is one you dismissed: the same words said at the same moment.
+ * @param item The item.
+ * @param dismissed The call's dismissed items.
+ * @returns True when dismissed.
+ */
+function isDismissed(item: ActionItem, dismissed: readonly ActionItem[]): boolean {
+  return dismissed.some((gone) => gone.saidAt === item.saidAt && gone.text === item.text);
 }
 
 /**

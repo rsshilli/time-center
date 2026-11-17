@@ -4,6 +4,9 @@ import { readableError } from "./CalendarSettings";
 import { formatClock, groupTurns } from "../shared/transcript";
 import { escapeMarkdown } from "./todoOrder";
 import { TranscriptTurns } from "./TranscriptTurns";
+import { CatchUpBar } from "./CatchUpBar";
+import { DismissButton } from "./DismissButton";
+import { useDismissals } from "./useDismissals";
 
 /** How often the card asks for fresh action items; the main process calls Haiku at most once a minute. */
 const ACTION_POLL_MS = 15_000;
@@ -83,6 +86,7 @@ export function LiveCallCard({ recording }: { recording: CallRecording }) {
           {recording.end === null ? `Since ${formatClock(recording.start)}` : "Ended; finishing the transcript"}
         </span>
       </div>
+      <CatchUpBar recordingId={recording.id} />
       <div className="live-columns">
         <div className="live-transcript">
           <h3>Transcript</h3>
@@ -95,11 +99,13 @@ export function LiveCallCard({ recording }: { recording: CallRecording }) {
         </div>
         <div className="live-actions">
           <h3>Possible action items</h3>
-          {items.items.length === 0 ? (
-            <p className="muted">{turns.length === 0 ? "Waiting for the call's first words." : "None yet."}</p>
-          ) : (
-            <ActionItemList items={items.items.slice(0, ITEMS_SHOWN)} recording={recording} />
-          )}
+          {/* Always there, even when empty, so Undo stays after the last item is dismissed and the list reloads. */}
+          <ActionItemList
+            items={items.items}
+            limit={ITEMS_SHOWN}
+            recording={recording}
+            empty={turns.length === 0 ? "Waiting for the call's first words." : "None yet."}
+          />
           {problem ? (
             <p className="message">Couldn't check for action items: {problem}</p>
           ) : (
@@ -115,13 +121,27 @@ export function LiveCallCard({ recording }: { recording: CallRecording }) {
 }
 
 /**
- * A list of action items, each with when it was said and a button that copies it to the TODO list.
+ * A list of action items, each with when it was said, a button that copies it to the TODO list, and one that
+ * dismisses it (with Undo) so it isn't suggested again.
  * @param props.items The items, newest first.
  * @param props.recording The call they came from, which the TODO links back to.
+ * @param props.empty What to say when there are none.
+ * @param props.limit The most shown, counted after the dismissed ones are taken out.
  */
-export function ActionItemList({ items, recording }: { items: CallRecording["actionItems"]; recording: CallRecording }) {
+export function ActionItemList({
+  items,
+  recording,
+  empty,
+  limit,
+}: {
+  items: CallRecording["actionItems"];
+  recording: CallRecording;
+  empty: string;
+  limit?: number;
+}) {
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [problem, setProblem] = useState<string | null>(null);
+  const dismissals = useDismissals(items, (item) => ({ recordingId: recording.id, saidAt: item.saidAt, text: item.text }));
 
   /**
    * Adds an item to the TODO list, linked to this call.
@@ -150,8 +170,9 @@ export function ActionItemList({ items, recording }: { items: CallRecording["act
 
   return (
     <>
+      {dismissals.shown.length === 0 && <p className="muted">{dismissals.anyDismissed ? "All dismissed." : empty}</p>}
       <ul className="action-items">
-        {items.map((item) => {
+        {dismissals.shown.slice(0, limit).map((item) => {
           const key = `${item.saidAt}:${item.text}`;
           return (
             <li key={key}>
@@ -160,10 +181,12 @@ export function ActionItemList({ items, recording }: { items: CallRecording["act
               <button type="button" className="secondary action-add" disabled={added.has(key)} onClick={() => void addToTodos(item, key)}>
                 {added.has(key) ? "Added ✓" : "Add to TODOs"}
               </button>
+              <DismissButton onClick={() => dismissals.dismiss(item)} />
             </li>
           );
         })}
       </ul>
+      {dismissals.note}
       {problem && <p className="error">{problem}</p>}
     </>
   );
