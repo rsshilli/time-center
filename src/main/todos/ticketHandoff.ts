@@ -1,7 +1,7 @@
 import { basename, join } from "node:path";
-import { COWORK_URL, type QbdcodeHandoff, type TicketBrief, type TicketSends, type TodoSent } from "../../shared/ipc";
+import { COWORK_URL, type QbdcodeHandoff, type TicketBrief, type TicketSends, type TicketWorktrees, type TodoSent } from "../../shared/ipc";
 import type { Store } from "../store/Store";
-import { cutText, type HandoffDependencies, listWorktrees, MAX_COWORK_CHARS, QBDVISION_REPO, sendToQbdcode, shortBranch } from "./handoff";
+import { cutText, type HandoffDependencies, listWorktrees, MAX_COWORK_CHARS, QBDVISION_REPO, sendToQbdcode, shortBranch, withPlanFirst } from "./handoff";
 import { assertTicketKeys } from "./jira";
 
 /** Where the record of sent tickets is kept in the settings table, as JSON. */
@@ -30,6 +30,7 @@ export interface TicketHandoffDependencies {
 /** The TODO tab's ticket requests, as the IPC answers them. */
 export interface TicketHandoffApi {
   getTicketSends(): TicketSends;
+  getTicketWorktrees(): TicketWorktrees;
   sendTicketsToCowork(keys: unknown): Promise<TicketSends>;
   prepareTicketsQbdcode(keys: unknown): Promise<QbdcodeHandoff>;
   sendTicketsToQbdcode(keys: unknown, path: unknown, text: unknown): Promise<TicketSends>;
@@ -44,6 +45,7 @@ export interface TicketHandoffApi {
 export function ticketHandoff(deps: TicketHandoffDependencies): TicketHandoffApi {
   return {
     getTicketSends: () => readTicketSends(deps.settings),
+    getTicketWorktrees: () => ticketWorktrees(deps.handoff.home),
     sendTicketsToCowork: async (keys) => {
       const checked = assertTicketKeys(keys);
       if (!deps.coworkInstalled()) {
@@ -88,6 +90,23 @@ export function readTicketSends(settings: Pick<Store, "getSetting">): TicketSend
   } catch {
     return {};
   }
+}
+
+/**
+ * Which qbdvision worktrees are on a branch naming each ticket, read from the branch names as they are now. A
+ * branch naming two tickets ("ryan-QI-1-and-QI-2") counts for both.
+ * @param home Your home folder.
+ * @returns The worktrees by ticket key, the main checkout first.
+ */
+export function ticketWorktrees(home: string): TicketWorktrees {
+  const byTicket: TicketWorktrees = {};
+  for (const worktree of listWorktrees(join(home, QBDVISION_REPO))) {
+    const keys = new Set(worktree.branch.match(/\b[A-Z][A-Z0-9]+-\d+\b/g) ?? []);
+    for (const key of keys) {
+      byTicket[key] = [...(byTicket[key] ?? []), { name: basename(worktree.path), path: worktree.path, branch: worktree.branch }];
+    }
+  }
+  return byTicket;
 }
 
 /**
@@ -161,7 +180,7 @@ export function prepareTicketsQbdcodeHandoff(home: string, tickets: readonly Tic
   const keys = new Set(tickets.map((ticket) => ticket.key));
   const onTicket = worktrees.find((worktree) => keys.has(shortBranch(worktree.branch)));
   return {
-    text: ticketsHandoffText(tickets),
+    text: withPlanFirst(ticketsHandoffText(tickets)),
     worktrees: worktrees.map((worktree) => ({ path: worktree.path, label: `${basename(worktree.path)} (${shortBranch(worktree.branch)})` })),
     preferredPath: onTicket?.path ?? null,
   };

@@ -1,13 +1,21 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { CallQuestion, CallQuestionScope, CallQuestionSource, CallQuestionTodo } from "../../shared/ipc";
+import { DismissedSuggestions } from "./DismissedSuggestions";
 
 /** A question to save: everything but its id. */
 export type NewCallQuestion = Omit<CallQuestion, "id">;
 
-/** The recording_questions table (migration 10): the questions you asked about your calls, and the answers. */
+/**
+ * The recording_questions table (migration 10): the questions you asked about your calls, and the answers. TODOs
+ * found while answering that you dismissed are left out of what it returns.
+ */
 export class CallQuestionStore {
+  private readonly dismissed: DismissedSuggestions;
+
   /** @param db The open database. */
-  constructor(private readonly db: DatabaseSync) {}
+  constructor(private readonly db: DatabaseSync) {
+    this.dismissed = new DismissedSuggestions(db);
+  }
 
   /**
    * Saves a question with its answer or error.
@@ -50,7 +58,7 @@ export class CallQuestionStore {
       note: row.note === null ? null : String(row.note),
       answer: row.answer === null ? null : String(row.answer),
       error: row.error === null ? null : String(row.error),
-      todos: parseList<CallQuestionTodo>(String(row.todos)),
+      todos: this.dismissed.without(parseList<CallQuestionTodo>(String(row.todos))),
     }));
   }
 }

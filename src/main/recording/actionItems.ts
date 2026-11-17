@@ -36,7 +36,7 @@ const SYSTEM_PROMPT = [
 /** What finding action items needs, injected for tests. */
 export interface ActionItemDeps {
   recordings: Pick<RecordingStore, "getRecording" | "listLines">;
-  store: Pick<ActionItemStore, "getItems" | "saveItems">;
+  store: Pick<ActionItemStore, "getItems" | "saveItems" | "listDismissed">;
   /** Haiku on Bedrock. */
   haiku: Pick<HaikuClient, "invoke">;
   /** A call's speakers, so the transcript names who said what. */
@@ -108,7 +108,11 @@ export class ActionItemFinder {
       const cutOff = turns[0]?.start ?? 0;
       const earlier = (saved?.items ?? []).filter((item) => item.saidAt >= cutOff);
       const kept = (saved?.items ?? []).filter((item) => item.saidAt < cutOff);
-      const found = readItems(await this.deps.haiku.invoke(buildRequest(turns, earlier, speakers)), turns);
+      // Ones you dismissed are shown to Haiku so it doesn't suggest them again, and left out if it does anyway.
+      const dismissed = this.deps.store.listDismissed(recordingId);
+      const found = readItems(await this.deps.haiku.invoke(buildRequest(turns, earlier, speakers, dismissed)), turns).filter(
+        (item) => !dismissed.some((gone) => gone.text === item.text),
+      );
       const items = [...found, ...kept.filter((item) => !found.some((match) => match.text === item.text))].slice(0, MAX_ITEMS);
       const next: StoredActionItems = { recordingId, items, coveredUntil: heardUntil, coveredLines: lines.length, checkedAt: now };
       this.deps.store.saveItems(next);
@@ -157,9 +161,15 @@ export function latestTurns(turns: Turn[], limit: number): Turn[] {
  * @param turns The turns to read, oldest first.
  * @param earlier The items found last time.
  * @param speakers The call's speakers, to name who said each turn.
+ * @param dismissed Items you dismissed from this call, which Haiku shouldn't suggest again.
  * @returns The Messages API body.
  */
-export function buildRequest(turns: Turn[], earlier: ActionItem[], speakers: readonly CallSpeaker[] = []): object {
+export function buildRequest(
+  turns: Turn[],
+  earlier: ActionItem[],
+  speakers: readonly CallSpeaker[] = [],
+  dismissed: readonly ActionItem[] = [],
+): object {
   const transcript = turns
     .map((turn, index) => `[${index}] ${formatClock(turn.start)} ${speakerLabel(turn, speakers)}: ${turn.text}`)
     .join("\n");
@@ -198,7 +208,12 @@ export function buildRequest(turns: Turn[], earlier: ActionItem[], speakers: rea
     messages: [
       {
         role: "user",
-        content: `<transcript>\n${transcript}\n</transcript>\n\nAction items found earlier:\n${found}`,
+        content:
+          `<transcript>\n${transcript}\n</transcript>\n\nAction items found earlier:\n${found}` +
+          (dismissed.length === 0
+            ? ""
+            : "\n\nThe user dismissed these as not action items. Don't list them again, reworded or not:\n" +
+              dismissed.map((item) => `- ${item.text} (said at ${formatClock(item.saidAt)})`).join("\n")),
       },
     ],
   };

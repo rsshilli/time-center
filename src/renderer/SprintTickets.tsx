@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SprintTicket, SprintTicketsReport, TicketMove, TicketSends, TodoActionInfo } from "../shared/ipc";
+import type { SprintTicket, SprintTicketsReport, TicketMove, TicketSends, TicketWorktrees, TodoActionInfo } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
 import { QbdcodeDialog } from "./QbdcodeDialog";
 import { sentUrl } from "./sentUrl";
@@ -21,6 +21,7 @@ export function SprintTickets() {
   const [loading, setLoading] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [sends, setSends] = useState<TicketSends>({});
+  const [worktrees, setWorktrees] = useState<TicketWorktrees>({});
   const [actions, setActions] = useState<TodoActionInfo[]>([]);
   const [sending, setSending] = useState<string | null>(null);
   const [sendProblem, setSendProblem] = useState<string | null>(null);
@@ -32,6 +33,8 @@ export function SprintTickets() {
     try {
       const latest = await window.timeCenter.getSprintTickets();
       setReport(latest);
+      // Branches change without Time Center knowing, so they're read again with every list.
+      window.timeCenter.getTicketWorktrees().then(setWorktrees, () => undefined);
       // A ticket that dropped off (merged, say) is unticked, so it doesn't come back ticked later.
       setPicked((current) => current.filter((key) => latest.tickets.some((ticket) => ticket.key === key)));
     } catch (failure) {
@@ -160,9 +163,14 @@ export function SprintTickets() {
                   </a>{" "}
                   <span>{ticket.summary}</span>
                 </span>
-                {(sends[ticket.key]?.length ?? 0) > 0 && (
+                {((sends[ticket.key]?.length ?? 0) > 0 || (worktrees[ticket.key]?.length ?? 0) > 0) && (
                   <div className="todo-meta sprint-sent">
-                    {sends[ticket.key].map((sent) => {
+                    {(worktrees[ticket.key] ?? []).map((worktree) => (
+                      <span key={worktree.path} className="sprint-worktree" title={`Branch ${worktree.branch} in ${worktree.path}`}>
+                        ⎇ {worktree.name}
+                      </span>
+                    ))}
+                    {(sends[ticket.key] ?? []).map((sent) => {
                       const url = sentUrl(sent);
                       const when = `Sent ${new Date(sent.at).toLocaleString()}`;
                       return url ? (

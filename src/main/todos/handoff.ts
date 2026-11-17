@@ -19,6 +19,14 @@ export const MAX_COWORK_CHARS = 14_000;
 /** The longest instructions the QbDCode popup sends, in characters. */
 export const MAX_QBDCODE_CHARS = 50_000;
 
+/**
+ * What every QbDCode hand-off ends with: plan first, change nothing until you've read the plan. It's in the popup's
+ * text from the start, and added again on sending if it was edited out.
+ */
+export const QBDCODE_PLAN_FIRST =
+  "Don't start solving this yet. First make a plan to solve it: write it to a .md file in the repo's .github/ " +
+  "folder, then stop and show it to me. Don't change any code until I've read the plan and told you to go ahead.";
+
 /** How much of the call before and after the item was said goes with it. */
 export const TRANSCRIPT_BEFORE_MS = 5 * 60_000;
 export const TRANSCRIPT_AFTER_MS = 2 * 60_000;
@@ -92,7 +100,7 @@ function qbdcodeUnavailable(deps: Pick<HandoffDependencies, "home">): string | n
  */
 export function prepareQbdcodeHandoff(deps: Pick<HandoffDependencies, "home" | "callTranscript">, todo: Todo): QbdcodeHandoff {
   return {
-    text: handoffText(todo, deps),
+    text: withPlanFirst(handoffText(todo, deps)),
     worktrees: listWorktrees(join(deps.home, QBDVISION_REPO)).map((worktree) => ({
       path: worktree.path,
       label: `${basename(worktree.path)} (${shortBranch(worktree.branch)})`,
@@ -121,7 +129,16 @@ export async function sendToQbdcode(deps: HandoffDependencies, path: unknown, te
   if (typeof text !== "string" || text.trim() === "" || text.length > MAX_QBDCODE_CHARS) {
     throw new Error(`Write the instructions, in up to ${MAX_QBDCODE_CHARS.toLocaleString()} characters.`);
   }
-  return startQbdcodeChat(deps, worktree, text.trim());
+  return startQbdcodeChat(deps, worktree, withPlanFirst(text.trim()));
+}
+
+/**
+ * Ends QbDCode instructions with the plan-first request, unless they already do.
+ * @param text The instructions.
+ * @returns The instructions with the request last.
+ */
+export function withPlanFirst(text: string): string {
+  return text.trimEnd().endsWith(QBDCODE_PLAN_FIRST) ? text.trimEnd() : `${text.trimEnd()}\n\n${QBDCODE_PLAN_FIRST}`;
 }
 
 /**

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COWORK_URL, type TicketBrief } from "../../src/shared/ipc";
-import { type HandoffDependencies, MAX_COWORK_CHARS, QBDCODE_CLI } from "../../src/main/todos/handoff";
+import { type HandoffDependencies, MAX_COWORK_CHARS, QBDCODE_CLI, QBDCODE_PLAN_FIRST } from "../../src/main/todos/handoff";
 import {
   MAX_DESCRIPTION_CHARS,
   MAX_SENDS_PER_TICKET,
@@ -146,6 +146,27 @@ describe("ticketHandoff", () => {
     });
   });
 
+  describe("getTicketWorktrees", () => {
+    it("should list each worktree under every ticket its branch names, the main checkout included", () => {
+      const folder = fakeRepo(home, "ryan-QI-2-and-QI-3-Export");
+      writeFileSync(join(home, "projects", "qbdvision", ".git", "HEAD"), "ref: refs/heads/ryan-QI-1-Fix\n");
+      const { api } = setUp();
+
+      const byTicket = api.getTicketWorktrees();
+
+      expect(byTicket["QI-1"]).toEqual([{ name: "qbdvision", path: join(home, "projects", "qbdvision"), branch: "ryan-QI-1-Fix" }]);
+      expect(byTicket["QI-2"]).toEqual([{ name: "qbdvision2", path: folder, branch: "ryan-QI-2-and-QI-3-Export" }]);
+      expect(byTicket["QI-3"]).toEqual(byTicket["QI-2"]);
+      expect(Object.keys(byTicket)).toHaveLength(3);
+    });
+
+    it("should list nothing for branches without a ticket, or without a checkout", () => {
+      expect(setUp().api.getTicketWorktrees()).toEqual({});
+      fakeRepo(home, "master");
+      expect(setUp().api.getTicketWorktrees()).toEqual({});
+    });
+  });
+
   describe("prepareTicketsQbdcode", () => {
     it("should start on the worktree already on one of the tickets' branches", async () => {
       const folder = fakeRepo(home, "ryan-QI-2-Export_rows");
@@ -156,6 +177,7 @@ describe("ticketHandoff", () => {
       expect(prepared.preferredPath).toBe(folder);
       expect(prepared.worktrees.map((worktree) => worktree.label)).toEqual(["qbdvision (main)", "qbdvision2 (QI-2)"]);
       expect(prepared.text).toContain("## QI-1");
+      expect(prepared.text.endsWith(QBDCODE_PLAN_FIRST)).toBe(true);
     });
 
     it("should leave the pick to the popup when no worktree is on a ticket", async () => {
@@ -176,7 +198,7 @@ describe("ticketHandoff", () => {
       const sends = await api.sendTicketsToQbdcode(["QI-1", "QI-2"], folder, "Do both");
 
       expect(handoff.run).toHaveBeenCalledTimes(1);
-      expect(handoff.run).toHaveBeenCalledWith("/bin/bash", [join(home, QBDCODE_CLI), "chat", folder, "--prompt", "Do both"], expect.anything());
+      expect(handoff.run).toHaveBeenCalledWith("/bin/bash", [join(home, QBDCODE_CLI), "chat", folder, "--prompt", `Do both\n\n${QBDCODE_PLAN_FIRST}`], expect.anything());
       expect(sends["QI-1"]).toEqual([{ action: "qbdcode", label: "QbDCode · qbdvision2", url: null, at: 1_000 }]);
       expect(sends["QI-2"]).toEqual(sends["QI-1"]);
     });

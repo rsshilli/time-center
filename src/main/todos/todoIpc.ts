@@ -125,6 +125,7 @@ export function registerTodoIpc(deps: TodoIpcDependencies): void {
     return list();
   });
   ipcMain.handle(IPC.getTicketSends, () => deps.tickets.getTicketSends());
+  ipcMain.handle(IPC.getTicketWorktrees, () => deps.tickets.getTicketWorktrees());
   ipcMain.handle(IPC.sendTicketsToCowork, (_event, keys: unknown) => deps.tickets.sendTicketsToCowork(keys));
   ipcMain.handle(IPC.prepareTicketsQbdcode, (_event, keys: unknown) => deps.tickets.prepareTicketsQbdcode(keys));
   ipcMain.handle(IPC.sendTicketsToQbdcode, (_event, keys: unknown, path: unknown, text: unknown) =>

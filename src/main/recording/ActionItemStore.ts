@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { ActionItem } from "../../shared/ipc";
+import { DismissedSuggestions } from "./DismissedSuggestions";
 
 /** A call's saved action items. */
 export interface StoredActionItems {
@@ -13,10 +14,17 @@ export interface StoredActionItems {
   checkedAt: number;
 }
 
-/** The recording_action_items table (migration 11): one row per call, replaced each time Haiku looks. */
+/**
+ * The recording_action_items table (migration 11): one row per call, replaced each time Haiku looks. Items you
+ * dismissed are left out of what it returns.
+ */
 export class ActionItemStore {
+  private readonly dismissed: DismissedSuggestions;
+
   /** @param db The open database. */
-  constructor(private readonly db: DatabaseSync) {}
+  constructor(private readonly db: DatabaseSync) {
+    this.dismissed = new DismissedSuggestions(db);
+  }
 
   /**
    * Saves a call's action items, replacing what was there.
@@ -37,7 +45,16 @@ export class ActionItemStore {
   }
 
   /**
-   * A call's action items.
+   * The action items you dismissed from a call, so Haiku can be told not to suggest them again.
+   * @param recordingId The call.
+   * @returns Them, oldest first.
+   */
+  listDismissed(recordingId: number): ActionItem[] {
+    return this.dismissed.list(recordingId).map(({ text, saidAt }) => ({ text, saidAt }));
+  }
+
+  /**
+   * A call's action items, without the ones you dismissed.
    * @param recordingId The call.
    * @returns Them, or null if Haiku never looked at it.
    */
@@ -50,7 +67,9 @@ export class ActionItemStore {
     }
     return {
       recordingId,
-      items: parseItems(String(row.items)),
+      items: this.dismissed
+        .without(parseItems(String(row.items)).map((item) => ({ ...item, recordingId })))
+        .map(({ text, saidAt }) => ({ text, saidAt })),
       coveredUntil: Date.parse(String(row.covered_until)),
       coveredLines: Number(row.covered_lines),
       checkedAt: Date.parse(String(row.checked_at)),

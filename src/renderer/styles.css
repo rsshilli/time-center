@@ -1762,6 +1762,12 @@ button.link.todo-source {
   margin-top: 2px;
 }
 
+/* The worktree whose branch names the ticket: where its work already is. */
+.sprint-worktree {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 /* Shown once a ticket is ticked: what can be done with the ticked ones. */
 .sprint-send-bar {
   display: flex;

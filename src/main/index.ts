@@ -48,6 +48,7 @@ import { RecordingStore, type StoredRecording } from "./recording/RecordingStore
 import { Transcriber, type TranscriberDeps } from "./recording/Transcriber";
 import { cancelWhisper, prepareWhisper, runWhisper, transcribeSpeech } from "./recording/whisper";
 import { CallQuestionStore } from "./recording/CallQuestionStore";
+import { DismissedSuggestions } from "./recording/DismissedSuggestions";
 import { askAboutCalls } from "./recording/callQuestions";
 import { ActionItemStore } from "./recording/ActionItemStore";
 import { ActionItemFinder } from "./recording/actionItems";
@@ -281,6 +282,7 @@ async function main(): Promise<void> {
     },
     actionItems,
     refreshActionItems: (recordingId) => actionItemFinder.refresh(recordingId),
+    dismissed: new DismissedSuggestions(store.db),
     now: () => Date.now(),
   });
   const jira = { settings: store, secrets: new SecretStore(store, safeStorage), fetch };

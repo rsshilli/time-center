@@ -15,9 +15,11 @@ import {
   nearestTurns,
   prepareQbdcodeHandoff,
   sendToQbdcode,
+  QBDCODE_PLAN_FIRST,
   shortBranch,
   startCowork,
   startQbdcodeChat,
+  withPlanFirst,
 } from "../../src/main/todos/handoff";
 
 const SAID_AT = new Date(2026, 10, 10, 12, 48).getTime();
@@ -239,7 +241,7 @@ describe("handoff", () => {
       const deps = fakeDeps(root);
 
       expect(prepareQbdcodeHandoff(deps, todo())).toEqual({
-        text: handoffText(todo(), deps),
+        text: `${handoffText(todo(), deps)}\n\n${QBDCODE_PLAN_FIRST}`,
         worktrees: [
           { path: repo, label: "qbdvision (main)" },
           { path: join(root, "projects", "qbdvision2"), label: "qbdvision2 (QI-16649)" },
@@ -259,7 +261,11 @@ describe("handoff", () => {
 
       await sendToQbdcode(deps, folder, "  Fix the export, then open a PR  ");
 
-      expect(deps.run).toHaveBeenCalledWith("/bin/bash", [join(root, QBDCODE_CLI), "chat", folder, "--prompt", "Fix the export, then open a PR"], expect.anything());
+      expect(deps.run).toHaveBeenCalledWith(
+        "/bin/bash",
+        [join(root, QBDCODE_CLI), "chat", folder, "--prompt", `Fix the export, then open a PR\n\n${QBDCODE_PLAN_FIRST}`],
+        expect.anything(),
+      );
       await expect(sendToQbdcode(deps, "/etc", "x")).rejects.toThrow(/Pick one of your qbdvision worktrees/);
       await expect(sendToQbdcode(deps, folder, "   ")).rejects.toThrow(/Write the instructions/);
       await expect(sendToQbdcode(deps, folder, "x".repeat(MAX_QBDCODE_CHARS + 1))).rejects.toThrow(/Write the instructions/);
@@ -270,6 +276,29 @@ describe("handoff", () => {
       fakeRepo(join(root, "projects"), "ref: refs/heads/main\n", []);
 
       await expect(sendToQbdcode(fakeDeps(root), join(root, QBDVISION_REPO), "x")).rejects.toThrow("Install QbDCode first");
+    });
+  });
+
+  describe("withPlanFirst", () => {
+    it("should end the instructions with the plan-first request exactly once", () => {
+      const once = withPlanFirst("Fix the export");
+
+      expect(once).toBe(`Fix the export\n\n${QBDCODE_PLAN_FIRST}`);
+      expect(withPlanFirst(`${once}\n`)).toBe(once);
+      expect(QBDCODE_PLAN_FIRST).toMatch(/plan/i);
+      expect(QBDCODE_PLAN_FIRST).toMatch(/Don't change any code until/);
+    });
+
+    it("should put the request back when it was edited out of the popup", async () => {
+      fakeRepo(join(root, "projects"), "ref: refs/heads/main\n", []);
+      mkdirSync(join(root, ".local", "bin"), { recursive: true });
+      writeFileSync(join(root, QBDCODE_CLI), "");
+      const deps = fakeDeps(root);
+
+      await sendToQbdcode(deps, join(root, QBDVISION_REPO), "Just fix it now");
+
+      const prompt = vi.mocked(deps.run).mock.calls[0][1].at(-1);
+      expect(prompt).toBe(`Just fix it now\n\n${QBDCODE_PLAN_FIRST}`);
     });
   });
 

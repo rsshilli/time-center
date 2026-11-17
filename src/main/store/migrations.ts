@@ -273,4 +273,15 @@ export const MIGRATIONS: readonly string[] = [
   -- The TODOs Sonnet found while answering a question, as JSON: [{text, recordingId, saidAt}].
   ALTER TABLE recording_questions ADD COLUMN todos TEXT NOT NULL DEFAULT '[]';
   `,
+  `
+  -- Suggested TODOs you dismissed on the Recordings tab (a call's action items, or ones found answering a
+  -- question): hidden from then on. Known by call, the moment said (epoch ms) and the words.
+  CREATE TABLE recording_dismissed_suggestions (
+    recording_id INTEGER NOT NULL REFERENCES recordings (id) ON DELETE CASCADE,
+    said_at      INTEGER NOT NULL,
+    text         TEXT NOT NULL,
+    dismissed_at TEXT NOT NULL,
+    PRIMARY KEY (recording_id, said_at, text)
+  );
+  `,
 ];

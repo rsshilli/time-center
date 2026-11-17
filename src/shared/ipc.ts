@@ -237,6 +237,13 @@ export interface ActionItem {
   saidAt: number;
 }
 
+/** A suggested TODO on the Recordings tab, as it's known when dismissed: its call, when it was said, its words. */
+export interface SuggestionRef {
+  recordingId: number;
+  saidAt: number;
+  text: string;
+}
+
 /** A live call's action items, after Haiku looked again (or chose not to: nothing new was said). */
 export interface ActionItemsReport {
   /** Newest first. */
@@ -517,6 +524,17 @@ export interface TicketBrief {
 /** Where each of your Jira tickets was sent from the TODO tab, newest last, by ticket key. */
 export type TicketSends = Record<string, TodoSent[]>;
 
+/** A qbdvision worktree whose branch names a ticket. */
+export interface TicketWorktree {
+  /** The worktree's folder name, e.g. "qbdvision3". */
+  name: string;
+  path: string;
+  branch: string;
+}
+
+/** The qbdvision worktrees on a branch naming each ticket, by ticket key. */
+export type TicketWorktrees = Record<string, TicketWorktree[]>;
+
 /** A ticket assigned to you in an open sprint, for the TODO tab. */
 export interface SprintTicket {
   key: string;
@@ -660,6 +678,8 @@ export const IPC = {
   getCallQuestions: "recordings:questions",
   transcribeDictation: "recordings:dictate",
   refreshActionItems: "recordings:action-items",
+  dismissSuggestion: "recordings:dismiss-suggestion",
+  restoreSuggestion: "recordings:restore-suggestion",
   getTodos: "todos:get",
   addTodo: "todos:add",
   updateTodo: "todos:update",
@@ -680,6 +700,7 @@ export const IPC = {
   prepareQbdcodeHandoff: "qbdcode:prepare",
   sendToQbdcode: "qbdcode:send",
   getTicketSends: "tickets:sends",
+  getTicketWorktrees: "tickets:worktrees",
   sendTicketsToCowork: "tickets:cowork",
   prepareTicketsQbdcode: "tickets:qbdcode-prepare",
   sendTicketsToQbdcode: "tickets:qbdcode-send",
@@ -759,6 +780,10 @@ export interface TimeCenterApi {
    * reads a call you're watching; it looks again when there are new words and a minute has passed.
    */
   refreshActionItems(recordingId: number): Promise<ActionItemsReport>;
+  /** Dismisses a suggested TODO on the Recordings tab, so it isn't shown again (nor found again by Haiku). */
+  dismissSuggestion(suggestion: SuggestionRef): Promise<void>;
+  /** Undoes a dismissal. */
+  restoreSuggestion(suggestion: SuggestionRef): Promise<void>;
   /** The TODO list: items to do in your order, then done items, most recently done first. */
   getTodos(): Promise<Todo[]>;
   /** Adds an item at the top of the list. */
@@ -801,6 +826,8 @@ export interface TimeCenterApi {
   sendToQbdcode(todoId: number, worktreePath: string, text: string): Promise<Todo[]>;
   /** Where your Jira tickets were sent from the TODO tab. */
   getTicketSends(): Promise<TicketSends>;
+  /** Which of your qbdvision worktrees are on a branch naming each ticket, read from the branch names now. */
+  getTicketWorktrees(): Promise<TicketWorktrees>;
   /** Opens a Cowork task in Claude Desktop on Jira tickets, and returns where tickets were sent, this one included. */
   sendTicketsToCowork(keys: string[]): Promise<TicketSends>;
   /** The instructions and worktrees the QbDCode popup starts with, for Jira tickets. */
