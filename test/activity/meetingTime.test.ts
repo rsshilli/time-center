@@ -154,6 +154,26 @@ describe("splitMeetingTime", () => {
     expect(result.meetings.map((day) => day.eventId)).toEqual(["Focus call"]);
   });
 
+  it("should not hand a block you put in for yourself your working time when a call runs into it", () => {
+    // The demo call ran 5 minutes past its end into "Ryan gets things done"; the rest of the block was coding.
+    const result = splitMeetingTime(
+      [item(0, 35, "Meetings", { onCall: true }), item(35, 120, "Coding", { app: "WebStorm" })],
+      [meeting("demo", 0, 30, { type: "other" }), meeting("focus", 30, 300, { attendees: [], joinUrl: null, type: null })],
+    );
+
+    expect(lines(result.timeline)).toEqual(["0-30 Meetings · Other", "30-35 Meetings · Other", "35-120 Coding"]);
+    expect(result.meetings.map((day) => day.eventId)).toEqual(["demo"]);
+  });
+
+  it("should still count a block you put in for yourself when you mark time as it", () => {
+    const result = splitMeetingTime(
+      [item(0, 20, "Coding", { manual: { id: 1, eventId: "focus" } })],
+      [meeting("focus", 0, 60, { attendees: [], joinUrl: null })],
+    );
+
+    expect(result.meetings.map((day) => day.attended)).toEqual([true]);
+  });
+
   it("should leave away time as away, even during a meeting", () => {
     const result = splitMeetingTime([item(0, 6, "Meetings"), item(6, 10, "Away", { kind: "idle" })], [meeting("standup", 0, 10)]);
     expect(lines(result.timeline)).toEqual(["0-6 Meetings · DSU", "6-10 Away"]);

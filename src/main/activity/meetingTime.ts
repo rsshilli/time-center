@@ -19,7 +19,8 @@ interface Span {
 /**
  * Splits the day's meeting time by type. A calendar meeting counts as attended when you were on a call
  * for at least five minutes of it (or half of it, if it's shorter) that no earlier meeting already
- * claimed, or when it's an accepted in-person meeting (guests, no call link). Then ALL active time during
+ * claimed, or when it's an accepted in-person meeting (guests, no call link). A block with nobody else invited
+ * and no call link is attended only when you mark a stretch as it yourself. Then ALL active time during
  * it, whatever app was in front, goes to "Meetings · <its type>". Call time outside any attended meeting
  * goes to "Meetings · Other" — or stays plain "Meetings" on a day with no calendar meetings at all.
  * Stretches are cut at meeting starts and ends so each piece belongs to one meeting at most.
@@ -33,7 +34,9 @@ export function splitMeetingTime(
   meetings: readonly MeetingForDay[],
 ): { timeline: TimelineItem[]; meetings: DayMeeting[]; allMeetings: DayMeeting[] } {
   const invited = meetings.filter((meeting) => meeting.response !== "declined");
-  const ownCalls = claimCallTime(timeline.filter(isCallTime), invited);
+  // A block you put in for yourself ("Ryan gets things done") is never attended by a call: a call that
+  // runs into it, or a quick huddle during it, would otherwise hand it all your working time.
+  const ownCalls = claimCallTime(timeline.filter(isCallTime), invited.filter(hasOthers));
   const attended = invited.filter((meeting) => ownCalls.has(meeting) || isInPerson(meeting) || isLinked(meeting, timeline));
   const msByEvent = new Map<string, number>();
   const pieces = timeline.flatMap((item) => (item.kind === "active" ? cutAtMeetings(item, attended) : [item]));
@@ -63,10 +66,19 @@ export function splitMeetingTime(
   }));
   return {
     timeline: sorted,
-    // Blocks with nobody else invited ("Drive to …") are only listed if you were on a call in them.
+    // Blocks with nobody else invited and no call link ("Drive to …") are only listed if you marked time as them.
     meetings: all.filter((meeting, i) => invited[i].attendees.length > 0 || meeting.attended),
     allMeetings: all,
   };
+}
+
+/**
+ * Says whether a meeting has other people in it: anyone else invited, or a call link to join.
+ * @param meeting The meeting.
+ * @returns False for a block you put in for yourself.
+ */
+function hasOthers(meeting: MeetingForDay): boolean {
+  return meeting.attendees.length > 0 || meeting.joinUrl !== null;
 }
 
 /**
