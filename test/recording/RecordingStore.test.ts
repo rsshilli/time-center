@@ -59,6 +59,18 @@ describe("RecordingStore", () => {
     expect(recordings.listLines(id).map((line) => line.text)).toEqual(["First", "Second"]);
   });
 
+  it("should keep which microphone lines were read with the speakers' sound taken out", () => {
+    const id = recordings.insertRecording(NOON, "/r/1");
+    recordings.insertLines(id, [
+      { side: "me", start: NOON, end: NOON + 1_000, text: "Cleaned", echoFree: true },
+      { side: "me", start: NOON + 2_000, end: NOON + 3_000, text: "Older" },
+    ]);
+    expect(recordings.listLines(id).map((line) => [line.text, line.echoFree])).toEqual([
+      ["Cleaned", true],
+      ["Older", false],
+    ]);
+  });
+
   it("should not find a call by words only in a line you said wasn't you", () => {
     const id = recordings.insertRecording(NOON, "/r/1");
     const [hidden] = recordings.insertLines(id, [

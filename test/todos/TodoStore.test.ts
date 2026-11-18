@@ -123,6 +123,14 @@ describe("TodoStore", () => {
     todos.addSent(id, { action: "jira", label: "QI-2", url: null, at: NOW + MIN });
 
     expect(todos.getTodo(id)?.sent.map((sent) => sent.label)).toEqual(["QI-1", "QI-2"]);
+    // Sent to Cowork twice (the first one cancelled): one entry, the latest.
+    todos.addSent(id, { action: "cowork", label: "Claude Cowork", url: "claude://cowork", at: NOW + 2 * MIN });
+    todos.addSent(id, { action: "cowork", label: "Claude Cowork", url: "claude://cowork", at: NOW + 3 * MIN });
+    expect(todos.getTodo(id)?.sent.map((sent) => [sent.label, sent.at])).toEqual([
+      ["QI-1", NOW],
+      ["QI-2", NOW + MIN],
+      ["Claude Cowork", NOW + 3 * MIN],
+    ]);
     expect(() => todos.addSent(999, { action: "jira", label: "QI-3", url: null, at: NOW })).toThrow(/no longer/);
   });
 });

@@ -306,7 +306,7 @@ describe("SpeakerService", () => {
     ];
     recordings.insertLines(id, [
       ...theirs.map(([, from, to], index) => ({ side: "them" as const, start: T0 + from * 1000, end: T0 + to * 1000, text: `their line number ${index} today` })),
-      ...yours.map(([, from, to], index) => ({ side: "me" as const, start: T0 + from * 1000, end: T0 + to * 1000, text: `my own line number ${index} here` })),
+      ...yours.map(([, from, to], index) => ({ side: "me" as const, start: T0 + from * 1000, end: T0 + to * 1000, text: `my own line number ${index} here`, echoFree: true })),
       { side: "me", start: T0 + 20_000, end: T0 + 23_000, text: "their line number 5 today" },
     ]);
     recordings.finishRecording(id, T0 + 60_000);
@@ -339,13 +339,32 @@ describe("SpeakerService", () => {
     ];
     const ids = recordings.insertLines(
       id,
-      mic.map(([, from, to], index) => ({ side: "me" as const, start: T0 + from * 1000, end: T0 + to * 1000, text: `a line on my mic number ${index}` })),
+      mic.map(([, from, to], index) => ({ side: "me" as const, start: T0 + from * 1000, end: T0 + to * 1000, text: `a line on my mic number ${index}`, echoFree: true })),
     );
     recordings.finishRecording(id, T0 + 60_000);
     recordings.setAudioPath(id, "/call.m4a");
     callAudio = audio(mic, T0);
     return { id, notYours: ids[2] };
   }
+
+  it("should not learn your voice from a call recorded before the speakers' sound was taken out of the microphone", async () => {
+    const id = recordings.insertRecording(T0, "/r");
+    const mic: Said[] = [
+      [1, 40, 43],
+      [1, 44, 47],
+    ];
+    recordings.insertLines(
+      id,
+      mic.map(([, from, to], index) => ({ side: "me" as const, start: T0 + from * 1000, end: T0 + to * 1000, text: `an old mic line number ${index}` })),
+    );
+    recordings.finishRecording(id, T0 + 60_000);
+    recordings.setAudioPath(id, "/call.m4a");
+    callAudio = audio(mic, T0);
+
+    await service.catchUp();
+
+    expect(speakers.findVoice("You")).toBeNull();
+  });
 
   it("should take a line you say wasn't you out of your voice and hide it, and put it back when you undo", async () => {
     const { id, notYours } = callWithSomeoneOnYourMic();
@@ -436,7 +455,7 @@ describe("SpeakerService", () => {
 
   it("should try a call once when your voice can't be learned from it", async () => {
     const id = recordings.insertRecording(T0, "/r");
-    recordings.insertLines(id, [{ side: "me", start: T0, end: T0 + 3_000, text: "my own line number one" }]);
+    recordings.insertLines(id, [{ side: "me", start: T0, end: T0 + 3_000, text: "my own line number one", echoFree: true }]);
     recordings.finishRecording(id, T0 + 60_000);
     recordings.setAudioPath(id, "/call.m4a");
     deps.readCall = async () => {

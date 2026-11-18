@@ -121,12 +121,12 @@ export class RecordingStore {
    */
   insertLines(recordingId: number, lines: Omit<TranscriptLine, "speakerId">[]): number[] {
     const insert = this.db.prepare(
-      "INSERT INTO transcript_lines (recording_id, side, started_at, ended_at, text) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO transcript_lines (recording_id, side, started_at, ended_at, text, echo_free) VALUES (?, ?, ?, ?, ?, ?)",
     );
     // All of a chunk's lines or none, so a chunk read again after a failure doesn't repeat half of them.
     this.db.exec("BEGIN");
     try {
-      const ids = lines.map((line) => Number(insert.run(recordingId, line.side, iso(line.start), iso(line.end), line.text).lastInsertRowid));
+      const ids = lines.map((line) => Number(insert.run(recordingId, line.side, iso(line.start), iso(line.end), line.text, line.echoFree ? 1 : 0).lastInsertRowid));
       this.db.exec("COMMIT");
       return ids;
     } catch (error) {
@@ -152,6 +152,7 @@ export class RecordingStore {
       text: String(row.text),
       speakerId: row.speaker_id === null || row.speaker_id === undefined ? null : Number(row.speaker_id),
       notYou: Number(row.not_you ?? 0) === 1,
+      echoFree: Number(row.echo_free ?? 0) === 1,
     }));
   }
 

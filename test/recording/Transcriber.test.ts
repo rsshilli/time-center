@@ -12,7 +12,10 @@ function setUp(
   run: (wav: string) => Promise<WhisperSegment[]>,
   prepare: () => Promise<{ whisper: string; model: string }> = async () => ({ whisper: "w", model: "m" }),
   insertLines: (id: number, lines: Omit<TranscriptLine, "speakerId">[]) => void = () => {},
+  gate: (wav: string) => Promise<boolean> = async () => true,
+  gatedWav: (wav: string) => boolean = () => false,
 ) {
+  const gated: string[] = [];
   const stored: { id: number; lines: Omit<TranscriptLine, "speakerId">[] }[] = [];
   const removed: string[] = [];
   const setAside: string[] = [];
@@ -32,6 +35,10 @@ function setUp(
     },
     prepare,
     run: (_whisper, _model, wav) => run(wav),
+    gate: async (_id, chunk) => {
+      gated.push(chunk.wav);
+      return { worthReading: await gate(chunk.wav), gated: gatedWav(chunk.wav) };
+    },
     remove: async (wav) => {
       removed.push(wav);
     },
@@ -42,13 +49,57 @@ function setUp(
     onChange: () => {},
     log: () => {},
   });
-  return { transcriber, stored, removed, setAside, voiced };
+  return { transcriber, stored, removed, setAside, voiced, gated };
 }
 
 /** Lets queued promise callbacks run. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("Transcriber", () => {
+  it("should take the echo out of microphone chunks only, and drop one left with nothing worth reading", async () => {
+    const read: string[] = [];
+    const { transcriber, stored, removed, gated } = setUp(
+      async (wav) => {
+        read.push(wav);
+        return [{ from: 0, to: 1000, text: "Hello" }];
+      },
+      undefined,
+      undefined,
+      async (wav) => wav !== "/echo.wav",
+    );
+
+    transcriber.add(1, { wav: "/echo.wav", side: "me", t0: 100 });
+    transcriber.add(1, { wav: "/mine.wav", side: "me", t0: 200 });
+    transcriber.add(1, { wav: "/theirs.wav", side: "them", t0: 300 });
+    await vi.waitFor(() => expect(transcriber.waiting(1)).toBe(0));
+    await vi.waitFor(() => expect(removed).toHaveLength(3));
+
+    expect(gated).toEqual(["/echo.wav", "/mine.wav"]);
+    expect(read).toEqual(["/mine.wav", "/theirs.wav"]);
+    expect(removed).toEqual(["/echo.wav", "/mine.wav", "/theirs.wav"]);
+    expect(stored.map((item) => item.lines[0].side)).toEqual(["me", "them"]);
+  });
+
+  it("should still read a microphone chunk whose echo couldn't be taken out", async () => {
+    const read: string[] = [];
+    const { transcriber } = setUp(
+      async (wav) => {
+        read.push(wav);
+        return [];
+      },
+      undefined,
+      undefined,
+      async () => {
+        throw new Error("bad wav");
+      },
+    );
+
+    transcriber.add(1, { wav: "/a.wav", side: "me", t0: 100 });
+    await vi.waitFor(() => expect(read).toHaveLength(1));
+
+    expect(read).toEqual(["/a.wav"]);
+  });
+
   it("should read chunks one at a time in order, store their lines and delete them", async () => {
     let running = 0;
     let most = 0;

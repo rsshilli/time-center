@@ -3,6 +3,7 @@ import { COWORK_URL, type QbdcodeHandoff, type TicketBrief, type TicketSends, ty
 import type { Store } from "../store/Store";
 import { cutText, type HandoffDependencies, listWorktrees, MAX_COWORK_CHARS, QBDVISION_REPO, sendToQbdcode, shortBranch, withPlanFirst } from "./handoff";
 import { assertTicketKeys } from "./jira";
+import { withSend } from "../../shared/sends";
 
 /** Where the record of sent tickets is kept in the settings table, as JSON. */
 export const TICKET_SENDS_KEY = "jira.ticketSends";
@@ -154,8 +155,9 @@ export function ticketsHandoffText(tickets: readonly TicketBrief[]): string {
 }
 
 /**
- * Remembers a send against each ticket in it. Only the latest few per ticket, and the most recently sent tickets,
- * are kept, so the record stays small.
+ * Remembers a send against each ticket in it, once per place (sending again to the same place replaces the
+ * earlier entry). Only the latest few per ticket, and the most recently sent tickets, are kept, so the record stays
+ * small.
  * @param deps The settings table and the clock.
  * @param keys The tickets sent.
  * @param sent Where they went.
@@ -165,7 +167,7 @@ export function recordTicketSends(deps: Pick<TicketHandoffDependencies, "setting
   const sends = readTicketSends(deps.settings);
   const at = deps.now();
   for (const key of keys) {
-    sends[key] = [...(sends[key] ?? []), { ...sent, at }].slice(-MAX_SENDS_PER_TICKET);
+    sends[key] = withSend(sends[key] ?? [], { ...sent, at }).slice(-MAX_SENDS_PER_TICKET);
   }
   const latest = (key: string) => sends[key].at(-1)?.at ?? 0;
   const kept = Object.keys(sends)

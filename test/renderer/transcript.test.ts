@@ -1,5 +1,5 @@
 import type { CallQuestion, CallRecording, TranscriptLine } from "../../src/shared/ipc";
-import { dropEchoes, groupTurns, transcriptText, yourOwnLines } from "../../src/shared/transcript";
+import { dropCarriedBack, dropEchoes, groupTurns, isTalkedOver, transcriptText, yourOwnLines } from "../../src/shared/transcript";
 import { isAbout, isOnDay } from "../../src/renderer/AskCard";
 import { typeList } from "../../src/renderer/JiraSettings";
 import { stateText, todoCount } from "../../src/renderer/RecordingsCard";
@@ -59,9 +59,44 @@ describe("dropEchoes", () => {
     expect(dropEchoes(lines)).toHaveLength(2);
   });
 
+  it("should keep a microphone line read with the speakers' sound taken out, even when they say the same", () => {
+    const lines = [line("them", 0, "Sorry if I'm going to contradict you here, Whitney."), { ...line("me", 0, "Sorry if I'm going to contradict you here, Whitney."), echoFree: true }];
+    expect(dropEchoes(lines)).toHaveLength(2);
+  });
+
   it("should keep your own words even when they repeat theirs much later", () => {
     const lines = [line("them", 0, "Ship it on Friday."), line("me", 60, "Ship it on Friday.")];
     expect(dropEchoes(lines)).toHaveLength(2);
+  });
+});
+
+describe("isTalkedOver", () => {
+  it("should say a line was talked over when someone else said something different at the same time", () => {
+    const mine = { ...line("me", 0, "Yes, there are agents and it's agentic."), echoFree: true };
+    expect(isTalkedOver(mine, [mine, line("them", 0, "Can I add a quick question about pricing?")])).toBe(true);
+  });
+
+  it("should not count your own words carried back, or someone talking before or after", () => {
+    const mine = { ...line("me", 10, "Yes, there are agents and it's agentic."), echoFree: true };
+    expect(isTalkedOver(mine, [mine, line("them", 10, "Yes, there are agents and it's agentic."), line("them", 0, "Go for it."), line("them", 20, "Thanks.")])).toBe(false);
+  });
+});
+
+describe("dropCarriedBack", () => {
+  it("should leave out their copy of what you said once the speakers' sound is out of your microphone", () => {
+    // From the 2026-11-17 Merck call: the call played Ryan's own voice back on their side a second later.
+    const lines = [
+      { ...line("me", 0, "I'm sorry if I'm going to contradict you here a little bit, Whitney."), echoFree: true },
+      line("them", 1, "Sorry if I'm going to contradict you here a little bit, Whitney."),
+      line("them", 3, "Go for it."),
+    ];
+    expect(dropCarriedBack(lines).map((kept) => kept.text)).toEqual([lines[0].text, "Go for it."]);
+    expect(groupTurns(lines).map((turn) => turn.side)).toEqual(["me", "them"]);
+  });
+
+  it("should keep their lines when your microphone line wasn't cleaned (an older call)", () => {
+    const lines = [line("them", 0, "Ship the build to the customer today."), line("me", 0, "Ship the build to the customer today.")];
+    expect(dropCarriedBack(lines)).toHaveLength(2);
   });
 });
 
@@ -75,6 +110,11 @@ describe("yourOwnLines", () => {
       line("them", 30, "Actually, can we move that review to Monday?"),
     ];
     expect(yourOwnLines(lines).map((kept) => kept.start)).toEqual([NINE + 10_000]);
+  });
+
+  it("should keep a long microphone line read with the speakers' sound taken out, even when repeated on their side", () => {
+    const lines = [line("them", 0, "Yes, there are agents and it's agentic."), { ...line("me", 0, "Yes, there are agents and it's agentic."), echoFree: true }];
+    expect(yourOwnLines(lines).map((kept) => kept.side)).toEqual(["me"]);
   });
 
   it("should leave out a line you said wasn't you", () => {

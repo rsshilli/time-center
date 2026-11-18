@@ -36,6 +36,7 @@ import { parseRules } from "./activity/classify";
 import { buildRangeReport } from "./activity/rangeReport";
 import { RULES_SETTING, registerIpcHandlers } from "./ipcHandlers";
 import { buildWorkLog } from "./recording/workLog";
+import { gateChunkFile, refPath, verdictPath } from "./recording/echoGate";
 import { Permissions, readAutomationStatus, runAppleScript } from "./permissions/Permissions";
 import { RecordingController } from "./recording/RecordingController";
 import { mixLeftoverSides, startRecorder } from "./recording/recorderProcess";
@@ -122,7 +123,6 @@ async function main(): Promise<void> {
   }
   registerScreenshotScheme();
   await app.whenReady();
-  app.dock?.hide();
 
   const store = new Store(join(app.getPath("userData"), "time-center.db"));
   enableStartAtLoginOnce(store, app);
@@ -393,6 +393,8 @@ async function main(): Promise<void> {
   systemPreferences.subscribeNotification("com.apple.screensaver.didstop", () => tracker.resume("screen saver"));
 
   app.on("second-instance", (_event, argv) => windows.show(screenFromArgs(argv)));
+  // In the Dock as well as the menu bar: clicking the Dock icon brings the window back.
+  app.on("activate", () => windows.bringForward());
   app.on("window-all-closed", () => {
     // A tray app keeps running with no windows open.
   });
@@ -458,8 +460,17 @@ function createTranscriber(recordings: RecordingStore, onLines: TranscriberDeps[
     onLines,
     prepare: () => prepareWhisper(join(app.getPath("userData"), "models")),
     run: runWhisper,
-    remove: (wav) => rm(wav, { force: true }),
-    setAside: (wav) => rename(wav, `${wav}.failed`),
+    gate: (_recordingId, chunk) => gateChunkFile(chunk.wav),
+    remove: async (wav) => {
+      await rm(wav, { force: true });
+      await rm(refPath(wav), { force: true });
+      await rm(verdictPath(wav), { force: true });
+    },
+    setAside: async (wav) => {
+      await rm(refPath(wav), { force: true });
+      await rm(verdictPath(wav), { force: true });
+      await rename(wav, `${wav}.failed`);
+    },
     cancel: cancelWhisper,
     // The Calls card re-reads on its own (every 5 s while a call is busy, else 30 s), so there's nothing to push.
     onChange: () => {},

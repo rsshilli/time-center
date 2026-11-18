@@ -165,6 +165,8 @@ export interface TranscriptLine {
   id?: number;
   /** A microphone line you said wasn't you: hidden, and never part of your voice. */
   notYou?: boolean;
+  /** A microphone line read after the speakers' sound was taken out of it (echoGate.ts), so surely you. */
+  echoFree?: boolean;
 }
 
 /** One voice on the other side of a call. */

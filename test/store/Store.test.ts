@@ -75,6 +75,32 @@ describe("Store", () => {
     store.close();
   });
 
+  it("should start your voice afresh once the speakers' sound is taken out of the microphone, keeping other voices", () => {
+    const path = join(dir, "a.db");
+    const old = new DatabaseSync(path);
+    MIGRATIONS.slice(0, 20).forEach((migration) => old.exec(migration));
+    const now = "2026-11-18T12:00:00.000Z";
+    const print = new Uint8Array(new Float32Array([0.6, 0.8]).buffer);
+    old.exec(`INSERT INTO recordings (id, started_at, folder, your_voice_learned_at, your_voice_weight) VALUES (1, '${now}', '/r', '${now}', 40)`);
+    old.exec(`INSERT INTO transcript_lines (recording_id, side, started_at, ended_at, text) VALUES (1, 'me', '${now}', '${now}', 'Whitney, heard through the speakers')`);
+    const voice = old.prepare("INSERT INTO voices (id, name, embedding, weight, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)");
+    voice.run(1, "You", print, 40, now, now);
+    voice.run(2, "Whitney", print, 5, now, now);
+    old.prepare("INSERT INTO call_speakers (id, recording_id, number, embedding, weight, voice_id, voice_score) VALUES (1, 1, 1, ?, 1, 1, 0.9)").run(print);
+    old.exec("PRAGMA user_version = 20");
+    old.close();
+
+    const store = new Store(path);
+    expect(store.db.prepare("SELECT name FROM voices").all().map((row) => ({ ...row }))).toEqual([{ name: "Whitney" }]);
+    expect({ ...(store.db.prepare("SELECT voice_id FROM call_speakers").get() as object) }).toEqual({ voice_id: null });
+    expect({ ...(store.db.prepare("SELECT your_voice_learned_at, your_voice_weight FROM recordings").get() as object) }).toEqual({
+      your_voice_learned_at: null,
+      your_voice_weight: null,
+    });
+    expect({ ...(store.db.prepare("SELECT echo_free FROM transcript_lines").get() as object) }).toEqual({ echo_free: 0 });
+    store.close();
+  });
+
   it("should not re-run migrations when the same file is opened again", () => {
     const path = join(dir, "a.db");
     const first = new Store(path);

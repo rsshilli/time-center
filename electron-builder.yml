@@ -30,7 +30,6 @@ mac:
   identity: "-"
   hardenedRuntime: false
   extendInfo:
-    LSUIElement: true
     NSMicrophoneUsageDescription: Time Center records your side of a meeting so it can be transcribed on this Mac.
     NSAudioCaptureUsageDescription: Time Center records the other side of a meeting so it can be transcribed on this Mac.
     NSAppleEventsUsageDescription: Time Center reads the address of the Chrome tab you're on to show where your time goes.

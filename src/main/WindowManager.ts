@@ -33,6 +33,19 @@ export class WindowManager {
   }
 
   /**
+   * Brings the window forward as it was, for a click on the Dock icon: the screen you left it on, or My time when
+   * it isn't open.
+   */
+  bringForward(): void {
+    if (!this.window || this.window.isDestroyed()) {
+      this.show("dashboard");
+      return;
+    }
+    this.window.show();
+    this.window.focus();
+  }
+
+  /**
    * Builds the window with a sandboxed renderer that can reach the main process only via the preload bridge.
    * @returns The window.
    */

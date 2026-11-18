@@ -1,5 +1,5 @@
 import type { TranscriptLine } from "../../shared/ipc";
-import { YOUR_VOICE, yourOwnLines } from "../../shared/transcript";
+import { isTalkedOver, YOUR_VOICE, yourOwnLines } from "../../shared/transcript";
 import type { AudioChunk } from "../recording/recorderProcess";
 import {
   MIN_VOICE_MS,
@@ -557,14 +557,15 @@ function voiceprintOf(printer: VoicePrinter, samples: Float32Array): Float32Arra
 }
 
 /**
- * The lines your voice is learned from in a call: your own (see yourOwnLines) long enough to tell, the longest
+ * The lines your voice is learned from in a call: your own (see yourOwnLines) long enough to tell and not talked
+ * over (the voice is read from the mixed recording, where the other person would be heard too), the longest
  * first, since they tell a voice best; a few dozen per call is plenty, and keeps a long call quick.
  * @param lines The call's lines.
  * @returns Them.
  */
 function linesToLearn(lines: TranscriptLine[]): TranscriptLine[] {
   return yourOwnLines(lines)
-    .filter((line) => line.end - line.start >= NEW_SPEAKER_MS)
+    .filter((line) => line.end - line.start >= NEW_SPEAKER_MS && !isTalkedOver(line, lines))
     .sort((a, b) => b.end - b.start - (a.end - a.start))
     .slice(0, YOUR_LINES_PER_CALL);
 }

@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { withSend } from "../../shared/sends";
 import { type NewTodo, TODO_SECTIONS, type Todo, type TodoLayout, type TodoSent } from "../../shared/ipc";
 
 /**
@@ -115,7 +116,8 @@ export class TodoStore {
   }
 
   /**
-   * Records where an item was sent, such as the Jira ticket made from it.
+   * Records where an item was sent, such as the Jira ticket made from it. Sending again to the same place
+   * replaces the earlier entry, so each place shows once.
    * @param id The item.
    * @param sent Where it went.
    */
@@ -124,7 +126,7 @@ export class TodoStore {
     if (!todo) {
       throw new Error("That item is no longer on your list.");
     }
-    this.db.prepare("UPDATE todos SET sent = ? WHERE id = ?").run(JSON.stringify([...todo.sent, sent]), id);
+    this.db.prepare("UPDATE todos SET sent = ? WHERE id = ?").run(JSON.stringify(withSend(todo.sent, sent)), id);
   }
 
   /**

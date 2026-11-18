@@ -4,6 +4,8 @@
 // other people, "them"), `.microphone` is you ("me"). Each side is resampled to 16 kHz mono and
 //   - written whole to `<out-dir>/<side>.m4a`, the recording kept for 30 days, and
 //   - cut into WAV chunks at a pause under `<out-dir>/chunks/`, for whisper to transcribe as the call goes.
+// Beside each microphone chunk goes `<chunk>.wav.ref`: what this Mac played over the same stretch, starting
+// REF_LEAD_SEC earlier, so Time Center can take the other people's voices (heard through the speakers) out of it.
 // Chunks with no speech in them are dropped here: whisper invents "Thank you." out of silence.
 // Adapted from QbDCode's common/qbdcode-shell/chat/listen-capture.swift, which records this way on this Mac.
 //
@@ -30,6 +32,10 @@ let PAUSE_SEC = 0.5
 let QUIET = Float(0.006)
 /// A chunk with less speech than this is dropped.
 let MIN_SPEECH_SEC = 0.6
+/// How much earlier than its microphone chunk a reference starts, so a late echo can be lined up (echoGate.ts).
+let REF_LEAD_SEC = 0.5
+/// How much of what this Mac played is kept for references: more than the longest chunk plus the lead.
+let HISTORY_SEC = 40.0
 
 /// Lines are printed from the capture queue and the main thread; the lock keeps them whole.
 let sayLock = NSLock()
@@ -58,6 +64,13 @@ final class Side {
     let chunkDir: URL
     let fileURL: URL
     var file: AVAudioFile?
+    /// The other people's side, whose recent sound is saved beside each of this side's chunks (set on "me" only).
+    var reference: Side?
+    /// Whether this side keeps its recent sound for the other side's references (set on "them" only).
+    var keepsHistory = false
+    /// The last HISTORY_SEC of this side's sound, and when its last sample arrived (epoch ms).
+    var history: [Float] = []
+    var historyEnd: Double = 0
     /// When this side's first sound was heard (epoch ms), to line the two sides up when they're mixed.
     var firstAt: Double?
     var converter: AVAudioConverter?
@@ -120,10 +133,27 @@ final class Side {
             firstAt = Date().timeIntervalSince1970 * 1000 - Double(converted.frameLength) / RATE * 1000
         }
         try? file?.write(from: converted)
+        let fresh = UnsafeBufferPointer(start: converted.floatChannelData![0], count: Int(converted.frameLength))
+        if keepsHistory {
+            let now = Date().timeIntervalSince1970 * 1000
+            let freshMs = Double(fresh.count) / RATE * 1000
+            // A gap in the stream (nothing sent while nothing played) is filled with silence, so every sample
+            // keeps its real time and the references line up with the microphone.
+            let gapMs = historyEnd > 0 ? now - freshMs - historyEnd : 0
+            if gapMs > 100 {
+                history.append(contentsOf: [Float](repeating: 0, count: min(Int(gapMs / 1000 * RATE), Int(HISTORY_SEC * RATE))))
+            }
+            history.append(contentsOf: fresh)
+            historyEnd = now
+            let keep = Int(HISTORY_SEC * RATE)
+            if history.count > keep + Int(RATE) * 5 {
+                history.removeFirst(history.count - keep)
+            }
+        }
         if samples.isEmpty {
             t0 = Date().timeIntervalSince1970 * 1000 - Double(converted.frameLength) / RATE * 1000
         }
-        samples.append(contentsOf: UnsafeBufferPointer(start: converted.floatChannelData![0], count: Int(converted.frameLength)))
+        samples.append(contentsOf: fresh)
         let seconds = Double(samples.count) / RATE
         if seconds >= MAX_SEC || (seconds >= MIN_SEC && quietTail()) {
             flush()
@@ -176,13 +206,33 @@ final class Side {
         }
         seq += 1
         let url = chunkDir.appendingPathComponent("\(src)-\(Int(t0))-\(seq).wav")
-        if writeWav(url) {
+        // The reference goes first, so it's there whenever Time Center sees the chunk.
+        if let reference {
+            _ = writeWav(url.appendingPathExtension("ref"), reference.recent(from: t0 - REF_LEAD_SEC * 1000, count: samples.count + Int(REF_LEAD_SEC * RATE)))
+        }
+        if writeWav(url, samples) {
             say(["wav": url.path, "src": src, "t0": Int(t0)])
         }
     }
 
-    /// Writes the waiting samples as 16-bit PCM WAV, via a temporary name so a reader never sees half a file.
-    func writeWav(_ url: URL) -> Bool {
+    /// This side's sound from a moment on, from the kept history; silence where it reaches outside it.
+    /// - Parameters:
+    ///   - from: The moment (epoch ms).
+    ///   - count: How many samples.
+    func recent(from: Double, count: Int) -> [Float] {
+        var out = [Float](repeating: 0, count: count)
+        let first = history.count - Int(((historyEnd - from) / 1000 * RATE).rounded())
+        for index in 0..<count {
+            let at = first + index
+            if at >= 0 && at < history.count {
+                out[index] = history[at]
+            }
+        }
+        return out
+    }
+
+    /// Writes samples as 16-bit PCM WAV, via a temporary name so a reader never sees half a file.
+    func writeWav(_ url: URL, _ samples: [Float]) -> Bool {
         var data = Data()
         func u32(_ value: UInt32) {
             var little = value.littleEndian
@@ -265,6 +315,8 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     init(_ dir: URL) {
         them = Side("them", dir)
         me = Side("me", dir)
+        them.keepsHistory = true
+        me.reference = them
     }
 
     /// Starts the stream. Screen Recording covers the system audio; the microphone needs its own permission.

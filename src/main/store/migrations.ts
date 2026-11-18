@@ -284,4 +284,24 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (recording_id, said_at, text)
   );
   `,
+  `
+  -- A microphone line from a chunk whose echo was taken out (echoGate.ts: the other people's voices, heard through
+  -- the Mac's speakers, silenced before it was read). Such a line is you, even when the same words come back on
+  -- the other side (then that copy is your voice carried back, and is the one hidden).
+  ALTER TABLE transcript_lines ADD COLUMN echo_free INTEGER NOT NULL DEFAULT 0;
+
+  -- The "You" voice was learned from microphone lines that were often the other people coming out of the speakers
+  -- (the 2026-11-17 Merck call), so it matched them as you. Start it again, empty, the same way as before; it is
+  -- learned from now on only from calls with the echo taken out.
+  UPDATE call_speakers SET voice_id = NULL, voice_score = NULL
+   WHERE confirmed = 0 AND voice_id IN (
+     SELECT id FROM voices WHERE name = 'You'
+        AND id NOT IN (SELECT voice_id FROM call_speakers WHERE confirmed = 1 AND voice_id IS NOT NULL));
+  DELETE FROM voices WHERE name = 'You'
+     AND id NOT IN (SELECT voice_id FROM call_speakers WHERE confirmed = 1 AND voice_id IS NOT NULL);
+  UPDATE voices SET embedding = zeroblob(length(embedding)), weight = 0 WHERE name = 'You';
+  UPDATE call_speakers SET named_embedding = NULL, named_weight = NULL
+   WHERE voice_id IN (SELECT id FROM voices WHERE name = 'You');
+  UPDATE recordings SET your_voice_learned_at = NULL, your_voice_embedding = NULL, your_voice_weight = NULL;
+  `,
 ];

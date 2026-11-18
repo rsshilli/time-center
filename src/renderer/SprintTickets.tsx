@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { SprintTicket, SprintTicketsReport, TicketMove, TicketSends, TicketWorktrees, TodoActionInfo } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
 import { QbdcodeDialog } from "./QbdcodeDialog";
+import { uniqueSends } from "../shared/sends";
 import { sentUrl } from "./sentUrl";
 
 /** How often the list is read again from Jira while the TODO tab is open. */
@@ -172,7 +173,7 @@ export function SprintTickets() {
                         ⎇ {worktree.name}
                       </span>
                     ))}
-                    {(sends[ticket.key] ?? []).map((sent) => {
+                    {uniqueSends(sends[ticket.key] ?? []).map((sent) => {
                       const url = sentUrl(sent);
                       const when = `Sent ${new Date(sent.at).toLocaleString()}`;
                       return url ? (

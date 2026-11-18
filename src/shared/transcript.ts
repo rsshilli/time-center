@@ -49,7 +49,7 @@ const ECHO_MIN_WORDS = 4;
 export function groupTurns(lines: TranscriptLine[], speakers: readonly CallSpeaker[] = []): Turn[] {
   const turns: Turn[] = [];
   const yours = lines.filter((line) => !line.notYou);
-  for (const line of dropRepeatsOfYou(dropEchoes(yours), speakers).sort((a, b) => a.start - b.start)) {
+  for (const line of dropRepeatsOfYou(dropCarriedBack(dropEchoes(yours)), speakers).sort((a, b) => a.start - b.start)) {
     const last = turns.at(-1);
     if (last && last.side === line.side && last.speakerId === line.speakerId) {
       last.text = `${last.text} ${line.text}`;
@@ -88,18 +88,19 @@ export function speakerLabel(turn: Pick<Turn, "side" | "speakerId">, speakers: r
 /**
  * Leaves out "me" lines that are the other people coming out of the speakers: without headphones your
  * microphone hears them too (seen in the 2026-11-09 live check, every "them" line repeated as "me"). A "me"
- * line is an echo when most of its words are in a "them" line said at about the same time.
+ * line is an echo when most of its words are in a "them" line said at about the same time. A line read after
+ * the speakers' sound was taken out of the microphone (echoFree) is never one: it's you.
  * @param lines The call's lines.
  * @returns The lines without the echoes.
  */
 export function dropEchoes(lines: TranscriptLine[]): TranscriptLine[] {
   const theirs = theirWords(lines);
   return lines.filter((line) => {
-    if (line.side !== "me") {
+    if (line.side !== "me" || line.echoFree) {
       return true;
     }
     // A short reply ("Yeah.", "Sounds good.") shares its words with plenty of lines; keep it.
-    return wordsOf(line.text).size < ECHO_MIN_WORDS || !twinsATheirLine(line, theirs);
+    return wordsOf(line.text).size < ECHO_MIN_WORDS || !twinsALine(line, theirs);
   });
 }
 
@@ -113,8 +114,47 @@ export function dropEchoes(lines: TranscriptLine[]): TranscriptLine[] {
 export function yourOwnLines(lines: TranscriptLine[]): TranscriptLine[] {
   const theirs = theirWords(lines);
   return lines.filter(
-    (line) => line.side === "me" && !line.notYou && wordsOf(line.text).size >= ECHO_MIN_WORDS && !twinsATheirLine(line, theirs),
+    (line) =>
+      line.side === "me" &&
+      !line.notYou &&
+      wordsOf(line.text).size >= ECHO_MIN_WORDS &&
+      (line.echoFree === true || !twinsALine(line, theirs)),
   );
+}
+
+/**
+ * Whether someone on the other side was talking during a line, saying something else (not your words carried
+ * back). The call's mixed audio then holds both voices, so the line can't teach yours.
+ * @param line A microphone line.
+ * @param lines The call's lines.
+ * @returns True when a "them" line said at the same time doesn't repeat it.
+ */
+export function isTalkedOver(line: TranscriptLine, lines: readonly TranscriptLine[]): boolean {
+  const words = wordsOf(line.text);
+  return lines.some(
+    (their) =>
+      their.side === "them" &&
+      their.start < line.end &&
+      their.end > line.start &&
+      !twinsALine(their, [{ line, words }]),
+  );
+}
+
+/**
+ * Leaves out "them" lines that repeat a microphone line read with the speakers' sound taken out (echoFree): that
+ * microphone line is surely you, so the copy on the other side is your own voice carried back by the call (a
+ * webinar or stream plays everyone back, you included; seen on the 2026-11-17 Merck call).
+ * @param lines The call's lines.
+ * @returns The lines without those copies.
+ */
+export function dropCarriedBack(lines: TranscriptLine[]): TranscriptLine[] {
+  const yours = lines
+    .filter((line) => line.side === "me" && line.echoFree && wordsOf(line.text).size >= ECHO_MIN_WORDS)
+    .map((line) => ({ line, words: wordsOf(line.text) }));
+  if (yours.length === 0) {
+    return lines;
+  }
+  return lines.filter((line) => line.side === "me" || !twinsALine(line, yours));
 }
 
 /**
@@ -149,14 +189,14 @@ function theirWords(lines: TranscriptLine[]): { line: TranscriptLine; words: Set
 }
 
 /**
- * Whether most of a "me" line's words are in a "them" line said at about the same time.
- * @param line The "me" line.
- * @param theirs The "them" lines with their words.
+ * Whether most of a line's words are in one of some other lines said at about the same time.
+ * @param line The line.
+ * @param others The other lines with their words.
  * @returns True when one repeats it.
  */
-function twinsATheirLine(line: TranscriptLine, theirs: { line: TranscriptLine; words: Set<string> }[]): boolean {
+function twinsALine(line: TranscriptLine, others: { line: TranscriptLine; words: Set<string> }[]): boolean {
   const mine = [...wordsOf(line.text)];
-  return theirs.some(({ line: their, words }) => {
+  return others.some(({ line: their, words }) => {
     const near = line.start < their.end + ECHO_WINDOW_MS && line.end > their.start - ECHO_WINDOW_MS;
     return near && mine.filter((word) => words.has(word)).length / mine.length >= ECHO_OVERLAP;
   });

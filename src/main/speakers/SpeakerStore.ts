@@ -207,6 +207,7 @@ export class SpeakerStore {
         `SELECT id, audio_path FROM recordings
          WHERE ended_at IS NOT NULL AND audio_deleted_at IS NULL AND audio_path IS NOT NULL
            AND speakers_state = 'done' AND your_voice_learned_at IS NULL
+           AND EXISTS (SELECT 1 FROM transcript_lines WHERE recording_id = recordings.id AND echo_free = 1)
          ORDER BY started_at DESC`,
       )
       .all() as { id: number; audio_path: string }[];
@@ -292,7 +293,7 @@ export class SpeakerStore {
    */
   listCallLines(recordingId: number): TranscriptLine[] {
     const rows = this.db
-      .prepare("SELECT id, side, started_at, ended_at, text, speaker_id, not_you FROM transcript_lines WHERE recording_id = ? ORDER BY started_at, id")
+      .prepare("SELECT id, side, started_at, ended_at, text, speaker_id, not_you, echo_free FROM transcript_lines WHERE recording_id = ? ORDER BY started_at, id")
       .all(recordingId) as Record<string, unknown>[];
     return rows.map((row) => ({
       id: Number(row.id),
@@ -302,6 +303,7 @@ export class SpeakerStore {
       text: String(row.text),
       speakerId: row.speaker_id === null ? null : Number(row.speaker_id),
       notYou: Number(row.not_you) === 1,
+      echoFree: Number(row.echo_free) === 1,
     }));
   }
 

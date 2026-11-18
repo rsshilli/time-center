@@ -4,6 +4,7 @@ import { TODO_SECTIONS, type Todo, type TodoActionInfo, type TodoDialog, type To
 import { readableError } from "./CalendarSettings";
 import { JiraDialog } from "./JiraDialog";
 import { QbdcodeDialog } from "./QbdcodeDialog";
+import { uniqueSends } from "../shared/sends";
 import { sentUrl } from "./sentUrl";
 import { SprintTickets } from "./SprintTickets";
 import { TodoEditor } from "./TodoEditor";
@@ -387,7 +388,7 @@ function TodoRow({ todo, actions, update, onOpenCall, drag, showSection }: RowPr
                 From {todo.source.title} · {new Date(todo.source.saidAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
               </button>
             )}
-            {todo.sent.map((sent) => {
+            {uniqueSends(todo.sent).map((sent) => {
               const url = sentUrl(sent);
               return url ? (
                 <a

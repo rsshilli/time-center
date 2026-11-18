@@ -243,14 +243,28 @@ describe("ticketHandoff", () => {
       expect(sends[`QI-${100 + MAX_TICKETS_REMEMBERED - 1}`]).toHaveLength(1);
     });
 
-    it("should keep the latest few sends of one ticket", () => {
+    it("should keep the latest few places one ticket was sent", () => {
       const settings = fakeSettings();
       let now = 0;
       for (let i = 0; i < MAX_SENDS_PER_TICKET + 2; i++) {
-        recordTicketSends({ settings, now: () => ++now }, ["QI-1"], { action: "qbdcode", label: "QbDCode · x", url: null });
+        recordTicketSends({ settings, now: () => ++now }, ["QI-1"], { action: "qbdcode", label: `QbDCode · x${i}`, url: null });
       }
 
       expect(readTicketSends(settings)["QI-1"].map((sent) => sent.at)).toEqual([3, 4, 5, 6, 7]);
+    });
+
+    it("should keep one entry, the latest, when a ticket is sent to the same place again", () => {
+      const settings = fakeSettings();
+      let now = 0;
+      const deps = { settings, now: () => ++now };
+      recordTicketSends(deps, ["QI-1"], { action: "cowork", label: "Claude Cowork", url: COWORK_URL });
+      recordTicketSends(deps, ["QI-1"], { action: "qbdcode", label: "QbDCode · x", url: null });
+      recordTicketSends(deps, ["QI-1"], { action: "cowork", label: "Claude Cowork", url: COWORK_URL });
+
+      expect(readTicketSends(settings)["QI-1"].map((sent) => [sent.label, sent.at])).toEqual([
+        ["QbDCode · x", 2],
+        ["Claude Cowork", 3],
+      ]);
     });
 
     it("should read an unreadable or odd saved value as nothing sent", () => {

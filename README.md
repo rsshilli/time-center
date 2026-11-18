@@ -30,7 +30,10 @@ which Claude reads for action items, and a TODO you choose to make into a Jira t
   recorded, and a red dot shows
   on the menu-bar icon. Each call becomes one file, such as `2026-11-09 Weekly sync.m4a`.
 - **Transcribes calls on your Mac.** Transcription uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
-  at low priority, and nothing is uploaded.
+  at low priority, and nothing is uploaded. Without headphones your microphone also hears the other people
+  through the Mac's speakers, so before your side is transcribed, anything on it that is only the speakers'
+  sound coming back is silenced. Your own voice, much louder at the microphone, is kept, even when you talk over
+  someone. Your "You" voice is learned only from calls cleaned this way.
 - **Recordings tab.** Your calls for the day, each with its transcript, a Copy button and a link to the
   audio file. Moving to a call in another app (Zoom, then Meet in Chrome, then Teams) starts a new recording
   once the new app has had the microphone for 20 seconds. One call that runs through several calendar meetings
@@ -97,7 +100,7 @@ npm run signing:setup   # once: a local certificate so macOS remembers the app's
 npm run packageAndRun   # builds dist/mac-arm64/Time Center.app and opens it
 ```
 
-The app has no Dock icon; look for it in the menu bar. To keep it, drag `dist/mac-arm64/Time Center.app`
+The app sits in both the Dock and the menu bar; click either to open it. To keep it, drag `dist/mac-arm64/Time Center.app`
 into `/Applications`. It starts at login on its own.
 
 `npm run signing:setup` matters. macOS ties permissions to the app's signature. Without a fixed

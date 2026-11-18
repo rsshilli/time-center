@@ -13,6 +13,12 @@ export interface TranscriberDeps {
   prepare(): Promise<{ whisper: string; model: string }>;
   /** Runs whisper on one WAV at low priority and returns what it heard, offsets in ms from the file's start. */
   run(whisper: string, model: string, wav: string): Promise<WhisperSegment[]>;
+  /**
+   * Takes the other people's voices (heard through the speakers) out of a microphone chunk before it's read.
+   * @returns Whether anything worth reading is left (false drops the chunk unread), and whether the echo was
+   *   taken out (the recorder saved what the speakers played).
+   */
+  gate(recordingId: number, chunk: AudioChunk): Promise<{ worthReading: boolean; gated: boolean }>;
   /** Deletes a chunk whisper has finished with. */
   remove(wav: string): Promise<void>;
   /** Sets a chunk aside that whisper couldn't read, so it isn't tried again and again. */
@@ -133,6 +139,11 @@ export class Transcriber {
    * @param tools whisper-cli and the model.
    */
   private async transcribe(job: Job, tools: { whisper: string; model: string }): Promise<void> {
+    const gate = job.chunk.side === "me" ? await this.gateEcho(job) : { worthReading: true, gated: false };
+    if (!gate.worthReading) {
+      await this.deps.remove(job.chunk.wav).catch(() => {});
+      return;
+    }
     let segments: WhisperSegment[];
     try {
       segments = await this.deps.run(tools.whisper, tools.model, job.chunk.wav);
@@ -147,7 +158,7 @@ export class Transcriber {
       return;
     }
     try {
-      const lines = toLines(job.chunk, segments);
+      const lines = toLines(job.chunk, segments, gate.gated);
       const ids = this.deps.store.insertLines(job.recordingId, lines);
       await this.deps.onLines(
         job.recordingId,
@@ -157,6 +168,21 @@ export class Transcriber {
       await this.deps.remove(job.chunk.wav);
     } catch (error) {
       this.deps.log(`Time Center: couldn't store the transcript of ${job.chunk.wav}`, error);
+    }
+  }
+
+  /**
+   * Takes the echo out of a microphone chunk. A chunk the gate can't read is read as it is, so a problem there
+   * never loses your words.
+   * @param job The chunk.
+   * @returns Whether anything is left worth reading, and whether the echo was taken out.
+   */
+  private async gateEcho(job: Job): Promise<{ worthReading: boolean; gated: boolean }> {
+    try {
+      return await this.deps.gate(job.recordingId, job.chunk);
+    } catch (error) {
+      this.deps.log(`Time Center: couldn't take the echo out of ${job.chunk.wav}`, error);
+      return { worthReading: true, gated: false };
     }
   }
 
@@ -188,9 +214,10 @@ export class Transcriber {
  * ("[BLANK_AUDIO]", "(music)") and empty ones.
  * @param chunk The chunk they came from.
  * @param segments What whisper heard, offsets from the chunk's start.
+ * @param echoFree Whether the speakers' sound was taken out of the chunk first.
  * @returns The lines.
  */
-export function toLines(chunk: AudioChunk, segments: WhisperSegment[]): TranscriptLine[] {
+export function toLines(chunk: AudioChunk, segments: WhisperSegment[], echoFree = false): TranscriptLine[] {
   return segments
     .map((segment) => ({ ...segment, text: segment.text.trim() }))
     .filter((segment) => segment.text !== "" && !/^[[(].*[\])]$/.test(segment.text))
@@ -200,5 +227,6 @@ export function toLines(chunk: AudioChunk, segments: WhisperSegment[]): Transcri
       end: chunk.t0 + segment.to,
       text: segment.text,
       speakerId: null,
+      ...(echoFree ? { echoFree: true } : {}),
     }));
 }
