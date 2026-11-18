@@ -51,7 +51,10 @@ which Claude reads for action items, and a TODO you choose to make into a Jira t
   it (whisper turns it into text on your Mac). Ask about one call (even one still going), the picked
   day's calls, or all your calls. For all calls, the app searches the transcripts for your question's
   words and sends only the calls that match. Claude Sonnet answers, and your questions and answers are
-  kept below the box.
+  kept below the box. "This day" and "Everything" also send your work log: your tracked time, the window
+  titles you spent it in, the TODOs you added and ticked, and your Jira tickets whose status changed. For
+  "Everything", Claude Haiku reads which days the question means ("last week", "yesterday"); with none
+  named it covers the last 7 days, and with days named only those days' calls are sent.
 - **TODOs tab.** Your TODO list, in a Work and a Personal section, each with its own Add box. Type an item
   and press Enter; it formats as you type (**bold**, _italics_, `code`, lists, "[ ] " sub-steps) and is saved
   as Markdown. Select words and press ⌘K to link them, or paste an address over them. Drag ⋮⋮ to reorder an

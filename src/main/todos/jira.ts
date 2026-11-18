@@ -517,6 +517,178 @@ export async function moveTicket(deps: JiraDependencies, key: unknown, moveId: u
   return listMySprintTickets(deps);
 }
 
+/** The state a ticket goes to once it's handed to QbDCode to work on. */
+export const STARTED_STATUS = "In Testing / Development";
+
+/**
+ * QI's states before work starts, which a ticket handed to QbDCode leaves. Listed by name rather than by Jira's "to
+ * do" group, since that group also holds later states ("QA Signed Off", "Fix has been submitted").
+ */
+export const NOT_STARTED_STATUSES = [
+  "Backlog",
+  "New",
+  "Open",
+  "In Draft",
+  "Prioritized",
+  "Product / Design review",
+  "Detailed Design",
+  "Product signed off",
+];
+
+/**
+ * Moves each ticket that hasn't been started yet (Backlog, In Draft, a design state…) to In Testing / Development,
+ * for when it has just been handed to QbDCode. A ticket already further on, or whose workflow has no such move, is
+ * left where it is. Never throws, so a Jira hiccup can't undo a hand-off that already happened.
+ * @param deps The saved settings and fetch.
+ * @param keys The tickets handed over.
+ * @returns The tickets moved, and a line for each one that couldn't be.
+ */
+export async function startTickets(deps: JiraDependencies, keys: readonly string[]): Promise<{ moved: string[]; problems: string[] }> {
+  const moved: string[] = [];
+  const problems: string[] = [];
+  if (jiraUnavailable(deps)) {
+    return { moved, problems };
+  }
+  const notStarted = new Set(NOT_STARTED_STATUSES.map((name) => name.toLowerCase()));
+  for (const key of keys) {
+    try {
+      const issue = (await jiraRequest(deps.fetch, savedConfig(deps), "GET", `/rest/api/3/issue/${assertTicketKey(key)}?fields=status`)) as {
+        fields?: { status?: { name?: unknown } };
+      };
+      const status = issue.fields?.status?.name;
+      if (typeof status !== "string" || !notStarted.has(status.toLowerCase())) {
+        continue;
+      }
+      const move = (await listTicketMoves(deps, key)).find((item) => item.status.toLowerCase() === STARTED_STATUS.toLowerCase());
+      if (!move) {
+        problems.push(`${key}: no move from ${status} to ${STARTED_STATUS}`);
+        continue;
+      }
+      await jiraRequest(deps.fetch, savedConfig(deps), "POST", `/rest/api/3/issue/${key}/transitions`, { transition: { id: move.id } });
+      moved.push(key);
+    } catch (error) {
+      problems.push(`${key}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { moved, problems };
+}
+
+/** A ticket of yours that moved in a stretch of time, for questions about your work. */
+export interface TicketActivity {
+  key: string;
+  summary: string;
+  type: string;
+  /** Where it is now. */
+  status: string;
+  /** When you created it, if you did within the stretch. */
+  createdByYouAt: number | null;
+  /** Its status changes within the stretch, earliest first. */
+  moves: { at: number; from: string; to: string; by: string }[];
+}
+
+/** The tickets of yours that moved in a stretch of time, or why they couldn't be read. */
+export interface TicketActivityReport {
+  tickets: TicketActivity[];
+  problem: string | null;
+}
+
+/** The most tickets read for one stretch. */
+const MAX_ACTIVITY_TICKETS = 100;
+
+/**
+ * The tickets you were assigned (now or earlier) whose status changed in a stretch of time, and the ones you created
+ * in it, each with its status changes then and who made them. Never throws: Jira not set up or unreachable comes
+ * back as the report's problem.
+ * @param deps The saved settings and fetch.
+ * @param from The stretch's start, in milliseconds.
+ * @param to Its end.
+ * @returns The tickets, most recently changed first.
+ */
+export async function listMyTicketActivity(deps: JiraDependencies, from: number, to: number): Promise<TicketActivityReport> {
+  const unavailable = jiraUnavailable(deps);
+  if (unavailable) {
+    return { tickets: [], problem: unavailable };
+  }
+  try {
+    const config = savedConfig(deps);
+    const start = jqlTime(from);
+    const end = jqlTime(to);
+    const params = new URLSearchParams({
+      jql:
+        `((assignee = currentUser() OR assignee WAS currentUser()) AND status CHANGED DURING ("${start}", "${end}")) ` +
+        `OR (reporter = currentUser() AND created >= "${start}" AND created < "${end}") ORDER BY updated DESC`,
+      fields: "summary,status,issuetype,created,reporter",
+      expand: "changelog",
+      maxResults: String(MAX_ACTIVITY_TICKETS),
+    });
+    const me = await myself(deps);
+    const reply = (await jiraRequest(deps.fetch, config, "GET", `/rest/api/3/search/jql?${params}`)) as { issues?: unknown[] };
+    const tickets = (reply.issues ?? []).flatMap((issue) => {
+      const read = readTicketActivity(issue, from, to, me?.accountId ?? null);
+      return read ? [read] : [];
+    });
+    return { tickets, problem: null };
+  } catch (error) {
+    return { tickets: [], problem: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Writes a moment the way JQL takes it, in this Mac's time zone.
+ * @param ms The moment.
+ * @returns e.g. "2026/11/09 00:00".
+ */
+function jqlTime(ms: number): string {
+  const date = new Date(ms);
+  const two = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}/${two(date.getMonth() + 1)}/${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}`;
+}
+
+/**
+ * Reads one ticket and its status changes within a stretch from Jira's search answer (with its changelog).
+ * @param value The issue as Jira sent it.
+ * @param from The stretch's start.
+ * @param to Its end.
+ * @param myId Your Jira account id, to tell which tickets you created; null when unknown.
+ * @returns The ticket, or null when it isn't readable.
+ */
+export function readTicketActivity(value: unknown, from: number, to: number, myId: string | null): TicketActivity | null {
+  const issue = value as {
+    key?: unknown;
+    fields?: Record<string, unknown>;
+    changelog?: { histories?: { created?: unknown; author?: { displayName?: unknown }; items?: { field?: unknown; fromString?: unknown; toString?: unknown }[] }[] };
+  } | null;
+  const fields = issue?.fields;
+  if (!issue || typeof issue.key !== "string" || !fields) {
+    return null;
+  }
+  const moves: TicketActivity["moves"] = [];
+  for (const history of issue.changelog?.histories ?? []) {
+    const at = readDate(history.created);
+    if (at === null || at < from || at >= to) {
+      continue;
+    }
+    for (const item of history.items ?? []) {
+      if (item.field === "status") {
+        const by = typeof history.author?.displayName === "string" ? history.author.displayName : "someone";
+        moves.push({ at, from: String(item.fromString ?? ""), to: String(item.toString ?? ""), by });
+      }
+    }
+  }
+  moves.sort((a, b) => a.at - b.at);
+  const created = readDate(fields.created);
+  const reporter = (fields.reporter as { accountId?: unknown } | undefined)?.accountId;
+  const mine = myId !== null && reporter === myId && created !== null && created >= from && created < to;
+  return {
+    key: issue.key,
+    summary: typeof fields.summary === "string" ? fields.summary : issue.key,
+    type: typeof (fields.issuetype as { name?: unknown } | undefined)?.name === "string" ? String((fields.issuetype as { name: string }).name) : "",
+    status: typeof (fields.status as { name?: unknown } | undefined)?.name === "string" ? String((fields.status as { name: string }).name) : "",
+    createdByYouAt: mine ? created : null,
+    moves,
+  };
+}
+
 /**
  * Reads tickets from Jira to hand to Claude: each one's summary, type, status, address and description as text.
  * @param deps The saved settings and fetch.

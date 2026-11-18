@@ -71,8 +71,9 @@ describe("ticketHandoff", () => {
     };
     const settings = fakeSettings();
     const readTickets = vi.fn(async (keys: string[]) => keys.map((key) => brief(key, `About ${key}`)));
-    const api = ticketHandoff({ handoff, readTickets, settings, coworkInstalled: () => coworkInstalled, now: () => 1_000 });
-    return { api, opened, settings, readTickets, handoff };
+    const startTickets = vi.fn(async (keys: string[]) => ({ moved: keys, problems: [] as string[] }));
+    const api = ticketHandoff({ handoff, readTickets, settings, startTickets, coworkInstalled: () => coworkInstalled, now: () => 1_000 });
+    return { api, opened, settings, readTickets, handoff, startTickets };
   }
 
   describe("ticketsHandoffText", () => {
@@ -203,12 +204,24 @@ describe("ticketHandoff", () => {
       expect(sends["QI-2"]).toEqual(sends["QI-1"]);
     });
 
-    it("should remember nothing when the chat doesn't start", async () => {
+    it("should start the tickets handed over once the chat has started", async () => {
       const folder = fakeRepo(home, "two");
-      const { api, settings } = setUp();
+      mkdirSync(join(home, ".local", "bin"), { recursive: true });
+      writeFileSync(join(home, QBDCODE_CLI), "");
+      const { api, startTickets } = setUp();
+
+      await api.sendTicketsToQbdcode(["QI-1", "QI-2"], folder, "Do both");
+
+      expect(startTickets).toHaveBeenCalledWith(["QI-1", "QI-2"]);
+    });
+
+    it("should remember nothing, and start no ticket, when the chat doesn't start", async () => {
+      const folder = fakeRepo(home, "two");
+      const { api, settings, startTickets } = setUp();
 
       await expect(api.sendTicketsToQbdcode(["QI-1"], folder, "x")).rejects.toThrow(/Install QbDCode first/);
       expect(settings.saved.has(TICKET_SENDS_KEY)).toBe(false);
+      expect(startTickets).not.toHaveBeenCalled();
     });
   });
 

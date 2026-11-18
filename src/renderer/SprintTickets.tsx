@@ -134,6 +134,8 @@ export function SprintTickets() {
           send={async (path, text) => {
             setSends(await window.timeCenter.sendTicketsToQbdcode(qbdcodeKeys, path, text));
             setPicked([]);
+            // Tickets not started yet were just moved to In Testing / Development.
+            void load();
           }}
           onClose={() => setQbdcodeKeys(null)}
         />

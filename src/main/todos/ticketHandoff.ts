@@ -22,6 +22,8 @@ export interface TicketHandoffDependencies {
   /** Reads the tickets from Jira. */
   readTickets(keys: string[]): Promise<TicketBrief[]>;
   settings: Pick<Store, "getSetting" | "setSetting">;
+  /** Moves tickets not started yet to In Testing / Development once they're handed to QbDCode; never throws. */
+  startTickets(keys: string[]): Promise<{ moved: string[]; problems: string[] }>;
   /** Whether Claude Desktop, which opens the Cowork link, is installed. */
   coworkInstalled(): boolean;
   now(): number;
@@ -38,7 +40,8 @@ export interface TicketHandoffApi {
 
 /**
  * Sending Jira tickets from the TODO tab to Claude, the way a TODO is sent: a new Cowork task, or one QbDCode chat
- * on all the tickets picked. Each send is remembered against every ticket in it.
+ * on all the tickets picked. Each send is remembered against every ticket in it. A ticket handed to QbDCode that
+ * hasn't been started yet is moved to In Testing / Development, since QbDCode is now working on it.
  * @param deps What it reads and does.
  * @returns The requests.
  */
@@ -63,7 +66,12 @@ export function ticketHandoff(deps: TicketHandoffDependencies): TicketHandoffApi
     sendTicketsToQbdcode: async (keys, path, text) => {
       const tickets = assertTicketKeys(keys);
       const sent = await sendToQbdcode(deps.handoff, path, text);
-      return recordTicketSends(deps, tickets, sent);
+      const sends = recordTicketSends(deps, tickets, sent);
+      const started = await deps.startTickets(tickets);
+      for (const problem of started.problems) {
+        console.warn(`Couldn't move a ticket handed to QbDCode to In Testing / Development: ${problem}`);
+      }
+      return sends;
     },
   };
 }

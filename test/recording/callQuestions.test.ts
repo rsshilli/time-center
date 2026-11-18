@@ -15,6 +15,7 @@ import { RecordingStore } from "../../src/main/recording/RecordingStore";
 import type { CalendarEvent } from "../../src/main/calendar/meetingLinks";
 import { Store } from "../../src/main/store/Store";
 import type { CallQuestionRequest } from "../../src/shared/ipc";
+import type { WorkPeriod } from "../../src/main/recording/workLog";
 
 const MON = new Date(2026, 10, 9, 9).getTime();
 const TUE = new Date(2026, 10, 10, 9).getTime();
@@ -40,6 +41,8 @@ describe("callQuestions", () => {
   let meetings: CalendarEvent[];
   let invoke: ReturnType<typeof vi.fn<(body: object) => Promise<unknown>>>;
   let deps: CallQuestionDeps;
+  let haikuInvoke: ReturnType<typeof vi.fn<(body: object) => Promise<unknown>>>;
+  let workLog: ReturnType<typeof vi.fn<(period: WorkPeriod) => Promise<string>>>;
 
   beforeEach(() => {
     store = new Store(":memory:");
@@ -47,7 +50,19 @@ describe("callQuestions", () => {
     questions = new CallQuestionStore(store.db);
     meetings = [];
     invoke = vi.fn<(body: object) => Promise<unknown>>(async () => ({ content: [{ type: "text", text: "  Dana wants test cards for Europe.  " }] }));
-    deps = { recordings, questions, listMeetings: () => meetings, listWindows: () => [], claude: { invoke }, speakers: () => [], now: () => TUE + 8 * 60 * MIN };
+    haikuInvoke = vi.fn<(body: object) => Promise<unknown>>(async () => ({ content: [{ type: "tool_use", name: "set_period", input: { about_a_period: false } }] }));
+    workLog = vi.fn<(period: WorkPeriod) => Promise<string>>(async () => "<work_log>QI-7 moved</work_log>");
+    deps = {
+      recordings,
+      questions,
+      listMeetings: () => meetings,
+      listWindows: () => [],
+      claude: { invoke },
+      haiku: { invoke: haikuInvoke },
+      workLog,
+      speakers: () => [],
+      now: () => TUE + 8 * 60 * MIN,
+    };
   });
 
   afterEach(() => {
@@ -90,8 +105,51 @@ describe("callQuestions", () => {
     expect(questions.listQuestions(10)[0].error).toBe("Bedrock said: throttled");
   });
 
-  it("should refuse an empty question and a scope with no calls, without calling Sonnet", async () => {
+  it("should answer a day with no calls from the work log alone", async () => {
+    const saved = await askAboutCalls(deps, ask("What did I get done?", "day", { at: MON }));
+
+    expect(workLog).toHaveBeenCalledWith({ from: new Date(2026, 10, 9).getTime(), to: new Date(2026, 10, 10).getTime() });
+    expect((invoke.mock.calls[0][0] as { messages: { content: string }[] }).messages[0].content).toContain("<work_log>QI-7 moved</work_log>");
+    expect(saved.sources).toEqual([]);
+    expect(saved.note).toBe("Also sent your tracked time, TODOs and Jira tickets for Mon, Nov 9.");
+  });
+
+  it("should send the calls and work log of the days the question names, and only those calls", async () => {
+    addCall(recordings, MON - 7 * 24 * 60 * MIN, ["Older budget talk"]);
+    const monday = addCall(recordings, MON, ["The budget is fine"]);
+    const tuesday = addCall(recordings, TUE, ["Lunch plans"]);
+    haikuInvoke.mockResolvedValue({ content: [{ type: "tool_use", name: "set_period", input: { about_a_period: true, from: "2026-11-09", to: "2026-11-10" } }] });
+
+    const saved = await askAboutCalls(deps, ask("What about the budget this week?", "all"));
+
+    expect(saved.sources.map((source) => source.recordingId)).toEqual([monday, tuesday]);
+    expect(workLog).toHaveBeenCalledWith({ from: new Date(2026, 10, 9).getTime(), to: new Date(2026, 10, 11).getTime() });
+    expect(saved.note).toBe("Also sent your tracked time, TODOs and Jira tickets for Mon, Nov 9 to Tue, Nov 10.");
+  });
+
+  it("should still answer from the calls, and say so, when the work log can't be made", async () => {
+    const id = addCall(recordings, MON, ["Hello"]);
+    workLog.mockRejectedValue(new Error("disk on fire"));
+
+    const saved = await askAboutCalls(deps, ask("Anything?", "all"));
+
+    expect(saved.sources.map((source) => source.recordingId)).toEqual([id]);
+    expect(saved.answer).toBe("Dana wants test cards for Europe.");
+    expect(saved.note).toContain("Couldn't read your tracked time and tickets: disk on fire");
+  });
+
+  it("should send no work log for one call", async () => {
+    const id = addCall(recordings, MON, ["Hello"]);
+
+    await askAboutCalls(deps, ask("Anything?", "call", { recordingId: id }));
+
+    expect(workLog).not.toHaveBeenCalled();
+    expect(haikuInvoke).not.toHaveBeenCalled();
+  });
+
+  it("should refuse an empty question and a scope with nothing to send, without calling Sonnet", async () => {
     await expect(askAboutCalls(deps, ask("   ", "day"))).rejects.toThrow(/question first/);
+    workLog.mockRejectedValue(new Error("no log"));
     await expect(askAboutCalls(deps, ask("Hi?", "day"))).rejects.toThrow(/no transcribed calls/);
     await expect(askAboutCalls(deps, ask("Hi?", "call", { recordingId: 99 }))).rejects.toThrow(/isn't recorded/);
     const silent = recordings.insertRecording(MON, "/tmp/none");

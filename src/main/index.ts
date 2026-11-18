@@ -32,7 +32,10 @@ import { startWindowHelper } from "./activity/windowHelper";
 import { BackupScheduler } from "./backup/BackupScheduler";
 import { BackupService } from "./backup/BackupService";
 import { S3ObjectStorage } from "./backup/ObjectStorage";
-import { registerIpcHandlers } from "./ipcHandlers";
+import { parseRules } from "./activity/classify";
+import { buildRangeReport } from "./activity/rangeReport";
+import { RULES_SETTING, registerIpcHandlers } from "./ipcHandlers";
+import { buildWorkLog } from "./recording/workLog";
 import { Permissions, readAutomationStatus, runAppleScript } from "./permissions/Permissions";
 import { RecordingController } from "./recording/RecordingController";
 import { mixLeftoverSides, startRecorder } from "./recording/recorderProcess";
@@ -71,12 +74,14 @@ import {
   createJiraTicket,
   jiraActions,
   listMySprintTickets,
+  listMyTicketActivity,
   listTicketMoves,
   moveTicket,
   readJiraSettings,
   readTicketBriefs,
   saveJiraSettings,
   searchAssignees,
+  startTickets,
 } from "./todos/jira";
 import { draftJiraTicket } from "./todos/jiraDraft";
 import { ticketHandoff } from "./todos/ticketHandoff";
@@ -271,6 +276,20 @@ async function main(): Promise<void> {
           listMeetings: (from, to) => calendar.store.listTypedEvents(from, to),
           listWindows: (from, to) => activity.listSegments(from, to),
           claude: sonnet,
+          haiku: new BedrockHaiku(),
+          workLog: (period) =>
+            buildWorkLog(
+              {
+                range: (from, to) =>
+                  buildRangeReport(activity, parseRules(store.getSetting(RULES_SETTING)), from, to, (start, end) =>
+                    calendar.store.listTypedEvents(start, end),
+                  ),
+                segments: (from, to) => activity.listSegments(from, to),
+                todos: () => new TodoStore(store.db).listTodos(),
+                tickets: (from, to) => listMyTicketActivity(jira, from, to),
+              },
+              period,
+            ),
           speakers: (id) => callSpeakers(speakerStore, id),
           now: () => Date.now(),
         },
@@ -322,6 +341,7 @@ async function main(): Promise<void> {
     tickets: ticketHandoff({
       handoff,
       readTickets: (keys) => readTicketBriefs(jira, keys),
+      startTickets: (keys) => startTickets(jira, keys),
       settings: store,
       coworkInstalled: () => existsSync(CLAUDE_DESKTOP),
       now: () => Date.now(),

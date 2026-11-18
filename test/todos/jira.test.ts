@@ -10,6 +10,7 @@ import {
   listSprints,
   listTicketMoves,
   moveTicket,
+  startTickets,
   readJiraSettings,
   readTicketBriefs,
   saveJiraSettings,
@@ -534,6 +535,53 @@ describe("readTicketBriefs", () => {
     await expect(readTicketBriefs(deps, "QI-1")).rejects.toThrow(/Pick from 1 to/);
     await expect(readTicketBriefs(deps, ["QI-1", "../myself"])).rejects.toThrow(/Not a Jira ticket/);
     await expect(readTicketBriefs(deps, Array.from({ length: MAX_HANDOFF_TICKETS + 1 }, (_, i) => `QI-${i}`))).rejects.toThrow(/Pick from 1 to/);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("startTickets", () => {
+  /** Jira set up, answering each ticket's status and moves from a table. */
+  function setUp(statuses: Record<string, string>, withStartMove = true) {
+    const stores = fakeStores();
+    stores.rawSettings.set(JIRA_KEYS.email, "me@example.com");
+    stores.rawSecrets.set(JIRA_KEYS.token, "t");
+    const move = (id: string, to: string) => ({ id, name: to, to: { name: to, statusCategory: { key: "indeterminate" } } });
+    const answers: Record<string, { status?: number; body: unknown }> = {};
+    for (const [key, status] of Object.entries(statuses)) {
+      answers[`GET /rest/api/3/issue/${key}`] = { body: { fields: { status: { name: status } } } };
+      answers[`GET /rest/api/3/issue/${key}/transitions`] = {
+        body: { transitions: [move("11", "PR Review"), ...(withStartMove ? [move("31", "In Testing / Development")] : [])] },
+      };
+      answers[`POST /rest/api/3/issue/${key}/transitions`] = { status: 204, body: "" };
+    }
+    const { fetchJira, calls } = fakeFetch(answers);
+    return { deps: { ...stores, fetch: fetchJira }, calls };
+  }
+
+  it("should move tickets not started yet to In Testing / Development, and leave the rest where they are", async () => {
+    const { deps, calls } = setUp({ "QI-1": "Backlog", "QI-2": "Detailed Design", "QI-3": "PR Review", "QI-4": "QA Signed Off" });
+
+    expect(await startTickets(deps, ["QI-1", "QI-2", "QI-3", "QI-4"])).toEqual({ moved: ["QI-1", "QI-2"], problems: [] });
+    const posts = calls.filter((call) => call.init.method === "POST");
+    expect(posts.map((call) => new URL(call.url).pathname)).toEqual(["/rest/api/3/issue/QI-1/transitions", "/rest/api/3/issue/QI-2/transitions"]);
+    expect(JSON.parse(String(posts[0].init.body))).toEqual({ transition: { id: "31" } });
+  });
+
+  it("should say so, and move nothing, when the workflow has no move to In Testing / Development", async () => {
+    const { deps, calls } = setUp({ "QI-1": "In Draft" }, false);
+
+    expect(await startTickets(deps, ["QI-1"])).toEqual({ moved: [], problems: ["QI-1: no move from In Draft to In Testing / Development"] });
+    expect(calls.some((call) => call.init.method === "POST")).toBe(false);
+  });
+
+  it("should carry on past a ticket Jira can't read, and do nothing when Jira isn't set up", async () => {
+    const { deps } = setUp({ "QI-2": "Backlog" });
+    const result = await startTickets(deps, ["QI-1", "QI-2"]);
+    expect(result.moved).toEqual(["QI-2"]);
+    expect(result.problems).toEqual([expect.stringMatching(/^QI-1: /)]);
+
+    const { fetchJira, calls } = fakeFetch({});
+    expect(await startTickets({ ...fakeStores(), fetch: fetchJira }, ["QI-1"])).toEqual({ moved: [], problems: [] });
     expect(calls).toHaveLength(0);
   });
 });

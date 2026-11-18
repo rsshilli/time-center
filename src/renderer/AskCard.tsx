@@ -12,11 +12,11 @@ import { suggestionKey, useDismissals } from "./useDismissals";
 const CALLS_REFRESH_MS = 15_000;
 
 /** Each scope's name in the picker. */
-const SCOPE_TEXT: Record<CallQuestionScope, string> = { call: "This call", day: "This day", all: "All calls" };
+const SCOPE_TEXT: Record<CallQuestionScope, string> = { call: "This call", day: "This day", all: "Everything" };
 
 /**
- * The question box on the Recordings tab: ask Sonnet about one call, the picked day's calls, or every call
- * that mentions your words. Type or dictate the question; past questions and answers are listed below it.
+ * The question box on the Recordings tab: ask Sonnet about one call, the picked day (its calls and your work log),
+ * or everything (the calls that mention your words, plus your work log for the days the question names). Type or dictate the question; past questions and answers are listed below it.
  * @param props.at A moment in the picked day.
  */
 export function AskCard({ at }: { at: number }) {
@@ -61,7 +61,7 @@ export function AskCard({ at }: { at: number }) {
     return () => clearInterval(timer);
   }, [loadCalls]);
 
-  const scopeEmpty = scope !== "all" && calls.length === 0;
+  const scopeEmpty = scope === "call" && calls.length === 0;
   const canAsk = question.trim() !== "" && !asking && !scopeEmpty && (scope !== "call" || recordingId !== null);
 
   /** Sends the question and puts the saved answer at the top of the list. */
@@ -94,7 +94,7 @@ export function AskCard({ at }: { at: number }) {
 
   return (
     <div className="card ask">
-      <h2>Ask about your calls</h2>
+      <h2>Ask about your calls and work</h2>
       <QuestionInput
         question={question}
         setQuestion={setQuestion}
@@ -135,9 +135,15 @@ export function AskCard({ at }: { at: number }) {
           {asking ? "Asking…" : "Ask"}
         </button>
       </div>
-      {scopeEmpty && <p className="muted">No transcribed calls on this day. Pick "All calls" to ask about older ones.</p>}
-      {scope === "all" && <p className="muted">Searches your calls for the question's words and sends the best matches.</p>}
-      {asking && <p className="muted">Sonnet is reading the transcripts…</p>}
+      {scopeEmpty && <p className="muted">No transcribed calls on this day. Pick "This day" or "Everything" to ask about your work.</p>}
+      {scope !== "call" && (
+        <p className="muted">
+          {scope === "all"
+            ? "Sends the calls that mention your words, plus your tracked time, TODOs and Jira tickets for the days you name (last 7 days if none)."
+            : "Sends this day's calls, plus your tracked time, TODOs and Jira tickets for the day."}
+        </p>
+      )}
+      {asking && <p className="muted">Sonnet is reading your calls and work…</p>}
       {problem && <p className="error">{problem}</p>}
       {history.length > 0 && shown.length === 0 && <p className="muted">No questions about this day's calls yet.</p>}
       {shown.length > 0 && (

@@ -13,6 +13,7 @@ import type { CalendarEvent } from "../calendar/meetingLinks";
 import type { CallQuestionStore } from "./CallQuestionStore";
 import { callSections, callTitle, WINDOWS_BEFORE_MS, type CallWindow } from "./callMeeting";
 import type { RecordingStore, StoredRecording } from "./RecordingStore";
+import { askPeriod, defaultPeriod, type WorkPeriod } from "./workLog";
 
 /** Transcript text sent with one question, at most (~75k tokens), so a question stays quick and cheap. */
 export const MAX_TRANSCRIPT_CHARS = 300_000;
@@ -41,10 +42,13 @@ const STOP_WORDS = new Set(
 
 /** How Sonnet should answer. */
 const SYSTEM_PROMPT = [
-  "You answer questions about the user's recorded calls, using the transcripts given.",
+  "You answer questions about the user's recorded calls and their work, using the call transcripts and the work log given.",
+  "The work log (when there is one) lists the user's tracked computer time, the window titles they spent it in, the " +
+    "TODOs they added and ticked, and their Jira tickets whose status changed. Use it for what they worked on or got " +
+    "done: a ticket moved to a later status, a pull request worked on, a TODO ticked. Name ticket keys when you mention them.",
   'In a transcript, "You" is the user\'s own microphone and "Them" is everyone else on the call (the transcript ' +
     "can't tell the other people apart). Transcripts were made by speech recognition, so some words may be misheard.",
-  "Answer only from the transcripts. If they don't say, say so plainly. When it helps, name which call " +
+  "Answer only from the transcripts and the work log. If they don't say, say so plainly. When it helps, name which call " +
     "(its meeting and date) a point came from.",
   "Be brief and plain. No Markdown: no headings, no bold; a list may use lines starting with \"- \".",
   "When your answer names tasks the user should do or follow up on (say they asked about a to-do, a task, an action " +
@@ -73,6 +77,10 @@ export interface CallQuestionDeps {
   listWindows(from: number, to: number): CallWindow[];
   /** Sonnet on Bedrock. */
   claude: Pick<HaikuClient, "invoke">;
+  /** Haiku on Bedrock, to read which days a question is about. */
+  haiku: Pick<HaikuClient, "invoke">;
+  /** Your tracked time, TODOs and Jira tickets over a stretch, as a <work_log> for Sonnet. */
+  workLog(period: WorkPeriod): Promise<string>;
   /** A call's speakers, so the transcript names who said what. */
   speakers(recordingId: number): CallSpeaker[];
   now(): number;
@@ -104,10 +112,13 @@ export async function askAboutCalls(deps: CallQuestionDeps, request: CallQuestio
   if (question === "") {
     throw new Error("Type or say a question first.");
   }
-  const picked = pickCalls(deps, request, question);
-  if (picked.calls.length === 0) {
+  const period = await questionPeriod(deps, request, question);
+  const picked = pickCalls(deps, request, question, period);
+  const log = await readWorkLog(deps, request.scope === "call" ? null : (period ?? defaultPeriod(deps.now())));
+  if (picked.calls.length === 0 && log.text === null) {
     throw new Error(emptyScopeMessage(deps, request));
   }
+  const note = [picked.note, log.note].filter(Boolean).join(" ") || null;
   const sources = picked.calls.map(
     (call): CallQuestionSource => ({ recordingId: call.recording.id, start: call.recording.start, title: call.title }),
   );
@@ -116,24 +127,61 @@ export async function askAboutCalls(deps: CallQuestionDeps, request: CallQuestio
   let error: string | null = null;
   let todos: CallQuestionTodo[] = [];
   try {
-    const found = splitTodos(readAnswer(await deps.claude.invoke(buildRequest(question, picked.calls, askedAt))), picked.calls);
+    const found = splitTodos(readAnswer(await deps.claude.invoke(buildRequest(question, picked.calls, askedAt, log.text))), picked.calls);
     answer = found.answer;
     todos = found.todos;
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
   }
-  return deps.questions.insertQuestion({ askedAt, question, scope: request.scope, sources, note: picked.note, answer, error, todos });
+  return deps.questions.insertQuestion({ askedAt, question, scope: request.scope, sources, note, answer, error, todos });
+}
+
+/**
+ * The days a question is about: the picked day for "day", the days it names for "all" (Haiku reads them), and
+ * none for one call.
+ * @param deps Haiku and the clock.
+ * @param request The request.
+ * @param question The question, trimmed.
+ * @returns The stretch, or null.
+ */
+async function questionPeriod(deps: CallQuestionDeps, request: CallQuestionRequest, question: string): Promise<WorkPeriod | null> {
+  if (request.scope === "day") {
+    const { dayStart, dayEnd } = localDayBounds(request.at);
+    return { from: dayStart, to: dayEnd };
+  }
+  return request.scope === "all" ? askPeriod(deps.haiku, question, deps.now()) : null;
+}
+
+/**
+ * Reads the work log for a stretch, and says what was sent. A log that couldn't be made is left out and said so,
+ * so the calls still get answered.
+ * @param deps The work log.
+ * @param period The stretch, or null for none.
+ * @returns The log (or null) and a note.
+ */
+async function readWorkLog(deps: CallQuestionDeps, period: WorkPeriod | null): Promise<{ text: string | null; note: string | null }> {
+  if (period === null) {
+    return { text: null, note: null };
+  }
+  const days = `${shortDay(period.from)}${period.to - period.from > 86_400_000 ? ` to ${shortDay(period.to - 1)}` : ""}`;
+  try {
+    return { text: await deps.workLog(period), note: `Also sent your tracked time, TODOs and Jira tickets for ${days}.` };
+  } catch (caught) {
+    return { text: null, note: `Couldn't read your tracked time and tickets: ${caught instanceof Error ? caught.message : String(caught)}` };
+  }
 }
 
 /**
  * Picks the calls a question covers: the one call, the picked day's calls, or for "all" the calls that
- * mention its words (best matches first), then trims them to fit the size limit.
+ * mention its words (best matches first), then trims them to fit the size limit. With "all" and named days,
+ * only that stretch's calls are sent, those mentioning its words first.
  * @param deps The stores and the calendar.
  * @param request The request.
  * @param question The question, trimmed.
+ * @param period The days the question names, or null.
  * @returns The calls, oldest first, and a note on how they were picked.
  */
-export function pickCalls(deps: CallQuestionDeps, request: CallQuestionRequest, question: string): Picked {
+export function pickCalls(deps: CallQuestionDeps, request: CallQuestionRequest, question: string, period: WorkPeriod | null = null): Picked {
   if (request.scope === "call") {
     const recording = request.recordingId === null ? null : deps.recordings.getRecording(request.recordingId);
     return fitToLimit(deps, recording ? [recording] : [], null);
@@ -143,7 +191,7 @@ export function pickCalls(deps: CallQuestionDeps, request: CallQuestionRequest, 
     // Newest first, so on a heavy day the size limit drops the morning rather than the call just had.
     return fitToLimit(deps, deps.recordings.listRecordings(dayStart, dayEnd).reverse(), null);
   }
-  return searchCalls(deps, question);
+  return period === null ? searchCalls(deps, question) : periodCalls(deps, question, period);
 }
 
 /**
@@ -165,9 +213,10 @@ function emptyScopeMessage(deps: CallQuestionDeps, request: CallQuestionRequest)
  * @param question The question.
  * @param calls The calls.
  * @param now The current time, so "yesterday" means something.
+ * @param workLog Your tracked time, TODOs and tickets over the question's days, or null.
  * @returns The request body.
  */
-export function buildRequest(question: string, calls: PickedCall[], now: number): object {
+export function buildRequest(question: string, calls: PickedCall[], now: number, workLog: string | null = null): object {
   const transcripts = calls
     .map((call, index) => {
       const end = call.recording.end === null ? "still going" : formatClock(call.recording.end);
@@ -185,7 +234,7 @@ export function buildRequest(question: string, calls: PickedCall[], now: number)
     messages: [
       {
         role: "user",
-        content: `${transcripts}\n\nToday is ${longDate(now)}, ${formatClock(now)}.\n\nQuestion: ${question}`,
+        content: `${[transcripts, workLog].filter(Boolean).join("\n\n")}\n\nToday is ${longDate(now)}, ${formatClock(now)}.\n\nQuestion: ${question}`,
       },
     ],
   };
@@ -374,6 +423,36 @@ function searchCalls(deps: CallQuestionDeps, question: string): Picked {
     `Searched your calls for ${quoted}: ${scored.length} matched` +
     (more > 0 ? `; sent the ${kept.length} best matches.` : ".");
   return fitToLimit(deps, kept, note, titles);
+}
+
+/**
+ * Sends the calls in a stretch: those mentioning the question's words first (most words, then most lines), then
+ * the rest newest first, until the size limit.
+ * @param deps The stores and the calendar.
+ * @param question The question.
+ * @param period The stretch.
+ * @returns The picked calls.
+ */
+function periodCalls(deps: CallQuestionDeps, question: string, period: WorkPeriod): Picked {
+  const now = deps.now();
+  const transcribed = deps.recordings.listTranscribedIds();
+  const inPeriod = deps.recordings.listRecordings(period.from, period.to).filter((recording) => transcribed.has(recording.id));
+  const words = searchWords(question);
+  const hits = deps.recordings.searchLines(words);
+  const ranked = inPeriod
+    .map((recording) => ({ recording, words: hits.get(recording.id)?.words.size ?? 0, lines: hits.get(recording.id)?.lines ?? 0 }))
+    .sort((a, b) => b.words - a.words || b.lines - a.lines || (b.recording.end ?? now) - (a.recording.end ?? now));
+  const note = inPeriod.length === 0 ? "No calls were recorded on those days." : null;
+  return fitToLimit(deps, ranked.map((item) => item.recording), note);
+}
+
+/**
+ * Writes a day briefly.
+ * @param ms A moment in it.
+ * @returns e.g. "Mon, Nov 9".
+ */
+function shortDay(ms: number): string {
+  return new Date(ms).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
 /**
