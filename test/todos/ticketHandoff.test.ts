@@ -68,6 +68,7 @@ describe("ticketHandoff", () => {
         opened.push(url);
       },
       run: vi.fn(async () => "Queued a chat\n"),
+      jiraTarget: () => ({ site: "https://example.atlassian.net", projectKey: "QI", issueTypes: ["Task"] }),
     };
     const settings = fakeSettings();
     const readTickets = vi.fn(async (keys: string[]) => keys.map((key) => brief(key, `About ${key}`)));

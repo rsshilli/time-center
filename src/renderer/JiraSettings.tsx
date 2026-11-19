@@ -13,8 +13,8 @@ interface JiraForm {
 }
 
 /**
- * Where a TODO's "Make a Jira ticket…" puts the ticket: your Jira site, the email and API token you sign in
- * with, the project and the types of ticket the popup offers. Saving checks them against Jira first; the token
+ * Your Jira: the site, the email and API token you sign in with, the project and its types of ticket (told to
+ * Claude when it drafts one). Saving checks them against Jira first; the token
  * is kept with the Mac's Keychain key and never shown again.
  */
 export function JiraSettings() {
@@ -69,9 +69,9 @@ export function JiraSettings() {
     <section className="jira-settings">
       <h1>Jira</h1>
       <p className="lead">
-        A TODO's ⋯ → Make a Jira ticket… opens a popup where Sonnet drafts the ticket from the item and its call:
-        one of the types below, a summary, description, assignee and Engineering Team, for you to change before
-        it's made.
+        Your sprint's tickets on the TODO tab are read from here. A TODO's ⋯ → Draft a Jira ticket with Claude
+        tells Claude this project and the types below, so the ticket lands in the right place when you tell it
+        to create it.
       </p>
       <form className="settings" onSubmit={(event) => void save(event)}>
         <label>

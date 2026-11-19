@@ -48,15 +48,15 @@ describe("todoIpc", () => {
   });
 
   it("should describe each action for the menu, saying which open a popup", () => {
-    expect(describeActions([action("Set up Jira in Settings first."), { ...action(null), id: "jira-popup", dialog: "jira" }])).toEqual([
+    expect(describeActions([action("Set up Jira in Settings first."), { ...action(null), id: "jira-popup", dialog: "qbdcode" }])).toEqual([
       { id: "jira", label: "Make a Jira ticket", unavailable: "Set up Jira in Settings first.", dialog: null },
-      { id: "jira-popup", label: "Make a Jira ticket", unavailable: null, dialog: "jira" },
+      { id: "jira-popup", label: "Make a Jira ticket", unavailable: null, dialog: "qbdcode" },
     ]);
   });
 
   it("should never run a popup action straight from the menu", async () => {
     const id = todos.addTodo({ markdown: "a", section: "work", source: null }, NOW);
-    const popup = { ...action(null), dialog: "jira" as const };
+    const popup = { ...action(null), dialog: "qbdcode" as const };
 
     await expect(runTodoAction({ store: todos, actions: [popup], now: () => NOW }, id, "jira")).rejects.toThrow(/isn't something/);
     expect(popup.run).not.toHaveBeenCalled();

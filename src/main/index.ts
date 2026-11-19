@@ -72,8 +72,6 @@ import { SecretStore } from "./store/SecretStore";
 import { Store } from "./store/Store";
 import { CLAUDE_DESKTOP, type HandoffDependencies, handoffActions, prepareQbdcodeHandoff, sendToQbdcode } from "./todos/handoff";
 import {
-  createJiraTicket,
-  jiraActions,
   listMySprintTickets,
   listMyTicketActivity,
   listTicketMoves,
@@ -81,10 +79,8 @@ import {
   readJiraSettings,
   readTicketBriefs,
   saveJiraSettings,
-  searchAssignees,
   startTickets,
 } from "./todos/jira";
-import { draftJiraTicket } from "./todos/jiraDraft";
 import { ticketHandoff } from "./todos/ticketHandoff";
 import { registerTodoIpc } from "./todos/todoIpc";
 import { TodoStore } from "./todos/TodoStore";
@@ -310,6 +306,7 @@ async function main(): Promise<void> {
   const jira = { settings: store, secrets: new SecretStore(store, safeStorage), fetch };
   const handoff: HandoffDependencies = {
     home: homedir(),
+    jiraTarget: () => readJiraSettings(jira),
     callTranscript: (id) =>
       recordings.getRecording(id) ? { lines: recordings.listLines(id), speakers: callSpeakers(speakerStore, id) } : null,
     openExternal: (url) => shell.openExternal(url),
@@ -326,13 +323,9 @@ async function main(): Promise<void> {
   };
   registerTodoIpc({
     store: new TodoStore(store.db),
-    actions: () => [...jiraActions(jira), ...handoffActions(handoff)],
+    actions: () => handoffActions(handoff),
     getJiraSettings: () => readJiraSettings(jira),
     saveJiraSettings: (input) => saveJiraSettings(jira, input),
-    draftJiraTicket: (todo, current, instruction) =>
-      draftJiraTicket({ jira, claude: sonnet, callTranscript: handoff.callTranscript, now: () => Date.now() }, todo, current, instruction),
-    searchJiraUsers: (query) => searchAssignees(jira, query),
-    createJiraTicket: (todo, draft) => createJiraTicket(jira, todo, draft),
     getSprintTickets: () => listMySprintTickets(jira),
     listTicketMoves: (key) => listTicketMoves(jira, key),
     moveTicket: (key, moveId) => moveTicket(jira, key, moveId),

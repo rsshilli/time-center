@@ -1,8 +1,6 @@
 import { ipcMain } from "electron";
 import {
   IPC,
-  type JiraDraftResult,
-  type JiraUser,
   type SprintTicketsReport,
   type TicketMove,
   MAX_TODO_CHARS,
@@ -41,16 +39,11 @@ export interface TodoAction {
 /** What the TODO requests are answered from. */
 export interface TodoIpcDependencies {
   store: TodoStore;
-  /** The actions on offer now (Jira's follow the ticket types saved in Settings). */
+  /** The actions on offer now. */
   actions(): TodoAction[];
   /** Jira's settings, read and saved. */
   getJiraSettings(): unknown;
   saveJiraSettings(input: unknown): Promise<unknown>;
-  /** Has Sonnet propose a ticket for an item, or change the proposal. */
-  draftJiraTicket(todo: Todo, current: unknown, instruction: unknown): Promise<JiraDraftResult>;
-  searchJiraUsers(query: unknown): Promise<JiraUser[]>;
-  /** Makes the ticket; returns where it went. */
-  createJiraTicket(todo: Todo, draft: unknown): Promise<Omit<TodoSent, "at">>;
   /** Your Jira tickets in the open sprints. */
   getSprintTickets(): Promise<SprintTicketsReport>;
   /** The states a ticket can be moved to. */
@@ -108,14 +101,6 @@ export function registerTodoIpc(deps: TodoIpcDependencies): void {
   });
   ipcMain.handle(IPC.getJiraSettings, () => deps.getJiraSettings());
   ipcMain.handle(IPC.saveJiraSettings, (_event, input: unknown) => deps.saveJiraSettings(input));
-  ipcMain.handle(IPC.draftJiraTicket, (_event, id: unknown, current: unknown, instruction: unknown) =>
-    deps.draftJiraTicket(openTodo(deps.store, assertRowId(id)), current, instruction),
-  );
-  ipcMain.handle(IPC.searchJiraUsers, (_event, query: unknown) => deps.searchJiraUsers(query));
-  ipcMain.handle(IPC.createJiraTicket, async (_event, id: unknown, draft: unknown) => {
-    await recordSent(deps, assertRowId(id), "jira", (todo) => deps.createJiraTicket(todo, draft));
-    return list();
-  });
   ipcMain.handle(IPC.getSprintTickets, () => deps.getSprintTickets());
   ipcMain.handle(IPC.listTicketMoves, (_event, key: unknown) => deps.listTicketMoves(key));
   ipcMain.handle(IPC.moveTicket, (_event, key: unknown, moveId: unknown) => deps.moveTicket(key, moveId));
@@ -137,7 +122,7 @@ export function registerTodoIpc(deps: TodoIpcDependencies): void {
  * Sends an item from one of its popups and records where it went.
  * @param deps The list and the clock.
  * @param id The item.
- * @param action The popup's action, saved with the record, e.g. "jira".
+ * @param action The popup's action, saved with the record, e.g. "qbdcode".
  * @param send Sends the item; returns where it went.
  */
 export async function recordSent(

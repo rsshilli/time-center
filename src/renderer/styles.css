@@ -2029,19 +2029,13 @@ button.sprint-status.doing {
   margin-top: 16px;
 }
 
-.jira-dialog {
-  width: min(860px, 100%);
-}
-
 /* Type, team, sprint (whose names and dates run longest) and assignee. */
 .jira-fields {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.7fr) minmax(0, 1.2fr);
   gap: 12px;
 }
-
-.jira-fields label,
-.jira-assignee label {
+.jira-fields label {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -2067,63 +2061,6 @@ button.sprint-status.doing {
 
 .jira-fields textarea {
   resize: vertical;
-}
-
-.jira-assignee {
-  position: relative;
-}
-
-.jira-assignee-list {
-  position: absolute;
-  z-index: 1;
-  top: 100%;
-  left: 0;
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  margin-top: 4px;
-  padding: 4px;
-  border-radius: 8px;
-  background: var(--panel);
-  box-shadow: 0 0 0 1px var(--line), 0 6px 18px rgb(0 0 0 / 0.18);
-}
-
-.jira-assignee-list button {
-  text-align: left;
-  padding: 6px 8px;
-  border: none;
-  background: transparent;
-  color: var(--text);
-}
-
-.jira-assignee-list button:hover {
-  background: var(--bg);
-}
-
-.jira-assignee-list > span {
-  padding: 6px 8px;
-}
-
-.jira-assignee-list .jira-unassigned {
-  color: var(--muted);
-}
-
-.jira-note {
-  margin: 0 0 12px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--wait) 15%, transparent);
-}
-
-.jira-change {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-  margin-top: 16px;
-}
-
-.jira-change .ask-input {
-  flex: 1;
 }
 
 /*

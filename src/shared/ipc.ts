@@ -504,16 +504,16 @@ export interface NewTodo {
 /** Something that can be done with an item from its menu, such as making a Jira ticket. */
 export interface TodoActionInfo {
   id: string;
-  /** The menu label, e.g. "Make a Jira ticket". */
+  /** The menu label, e.g. "Draft a Jira ticket with Claude". */
   label: string;
-  /** Why it can't run yet (e.g. "Set up Jira in Settings first"); null when it's ready. */
+  /** Why it can't run yet (e.g. "Install Claude Desktop first"); null when it's ready. */
   unavailable: string | null;
   /** The popup it opens instead of running straight away, or null when it runs from the menu. */
   dialog: TodoDialog | null;
 }
 
 /** The popups an item's menu can open. */
-export type TodoDialog = "jira" | "qbdcode";
+export type TodoDialog = "qbdcode";
 
 /** What the QbDCode popup starts with. */
 export interface QbdcodeHandoff {
@@ -586,58 +586,7 @@ export interface SprintTicketsReport {
   problem: string | null;
 }
 
-/** Someone a Jira ticket can be assigned to. */
-export interface JiraUser {
-  accountId: string;
-  displayName: string;
-}
 
-/** A Jira ticket as proposed in the popup, before it's made. */
-export interface JiraDraft {
-  /** One of the ticket types saved in Settings. */
-  issueType: string;
-  summary: string;
-  /** Markdown; it's turned into Jira's format when the ticket is made. */
-  description: string;
-  /** Null leaves the ticket unassigned. */
-  assignee: JiraUser | null;
-  /** One of the project's Engineering Team choices, or null for none. */
-  team: string | null;
-  /** The id of one of the project's open sprints, or null for the backlog. */
-  sprint: number | null;
-}
-
-/** A sprint a ticket can go into: one that's going now or hasn't started. */
-export interface JiraSprint {
-  id: number;
-  name: string;
-  state: "active" | "future";
-  /** When it starts and ends, or null for a sprint without dates. */
-  start: number | null;
-  end: number | null;
-  /** The Engineering Team whose sprint it is, read from its name ("PØD-2026-22"), or null when none matches. */
-  team: string | null;
-}
-
-/** A proposed ticket, with the choices the popup offers. */
-export interface JiraDraftResult {
-  draft: JiraDraft;
-  issueTypes: string[];
-  /** Each type's Engineering Team choices; empty for a type without that field. */
-  teamsByType: Record<string, string[]>;
-  /** The project's open sprints, earliest first. */
-  sprints: JiraSprint[];
-  /** The types of ticket that can go into a sprint (their create screen has a Sprint field). */
-  sprintTypes: string[];
-  /** Something to tell you about the proposal, e.g. that the person named couldn't be found in Jira. */
-  note: string | null;
-}
-
-/** The longest Jira summary Jira accepts. */
-export const MAX_JIRA_SUMMARY_CHARS = 255;
-
-/** The longest Jira description accepted from the popup, in characters of Markdown. */
-export const MAX_JIRA_DESCRIPTION_CHARS = 30_000;
 
 /** The Jira settings, as Settings shows them. The token itself never comes back to the window. */
 export interface JiraSettings {
@@ -710,9 +659,6 @@ export const IPC = {
   runTodoAction: "todos:run-action",
   getJiraSettings: "jira:get-settings",
   saveJiraSettings: "jira:save-settings",
-  draftJiraTicket: "jira:draft",
-  searchJiraUsers: "jira:users",
-  createJiraTicket: "jira:create",
   getSprintTickets: "jira:sprint-tickets",
   listTicketMoves: "jira:ticket-moves",
   moveTicket: "jira:move-ticket",
@@ -825,16 +771,6 @@ export interface TimeCenterApi {
   getJiraSettings(): Promise<JiraSettings>;
   /** Saves the Jira settings after checking them against Jira; throws with Jira's answer when they don't work. */
   saveJiraSettings(input: JiraSettingsInput): Promise<JiraSettings>;
-  /**
-   * Has Sonnet propose a Jira ticket for an item, or change the proposal as asked.
-   * @param current The proposal as it stands in the popup, or null for a first draft.
-   * @param instruction What to change, e.g. "make it a bug for Platform"; null for a first draft.
-   */
-  draftJiraTicket(todoId: number, current: JiraDraft | null, instruction: string | null): Promise<JiraDraftResult>;
-  /** The people a ticket can be assigned to whose name or email matches. */
-  searchJiraUsers(query: string): Promise<JiraUser[]>;
-  /** Makes the ticket and returns the list with it recorded on the item. */
-  createJiraTicket(todoId: number, draft: JiraDraft): Promise<Todo[]>;
   /** The Jira tickets assigned to you in the open sprints. */
   getSprintTickets(): Promise<SprintTicketsReport>;
   /** The states a ticket can be moved to from where it is. */

@@ -27,6 +27,33 @@ export const QBDCODE_PLAN_FIRST =
   "Don't start solving this yet. First make a plan to solve it: write it to a .md file in the repo's .github/ " +
   "folder, then stop and show it to me. Don't change any code until I've read the plan and told you to go ahead.";
 
+/**
+ * The rules a Jira draft in Cowork goes by: draft only, never start the work, create nothing until told to. Kept
+ * at the very top of the text so Claude reads them before the item.
+ */
+export const JIRA_DRAFT_RULES = [
+  "Help me turn the TODO below into a Jira ticket.",
+  "",
+  "Your only job is to draft the ticket. Do not solve, fix, investigate or plan the work itself: no code, no digging " +
+    "into the cause, no steps for doing it. Just write what will go into Jira.",
+  "",
+  "Do not create anything in Jira until I explicitly tell you to create the ticket. Show me the draft first; I'll " +
+    "change it with you.",
+].join("\n");
+
+/** How Claude is told to write the draft: the same conventions the team's tickets follow. */
+export const JIRA_DRAFT_GUIDE = [
+  "The draft:",
+  "- Type: one of the types listed below.",
+  "- Summary: one short line saying what is to be done.",
+  "- Description, in Markdown under ## headings: the goal, the details that were agreed, and anything still open. Brief: a few sentences or a short list.",
+  '- A story needs an "## Acceptance Criteria" section: a plain "- " list of checkable outcomes.',
+  '- A bug needs "## Steps to reproduce" (numbered) and "## Expected / Actual" (an "Expected:" paragraph, then an "Actual:" paragraph).',
+  "- Engineering Team: almost always PØD or Platform, unless the item or the call clearly says another team.",
+  "- Assignee: whoever the call shows taking it on; otherwise leave it for me to say.",
+  'Use only what the item and the call say. Never invent requirements, names or dates; write "Not covered in the call." rather than guessing.',
+].join("\n");
+
 /** How much of the call before and after the item was said goes with it. */
 export const TRANSCRIPT_BEFORE_MS = 5 * 60_000;
 export const TRANSCRIPT_AFTER_MS = 2 * 60_000;
@@ -52,19 +79,29 @@ export interface HandoffDependencies {
   openExternal(url: string): Promise<void>;
   /** Runs a program and resolves with what it printed; rejects when it fails. */
   run(file: string, args: string[], env: Record<string, string>): Promise<string>;
+  /** Where a drafted ticket is to go: the Jira site, the project and its ticket types, from Settings → Jira. */
+  jiraTarget(): { site: string; projectKey: string; issueTypes: string[] };
 }
 
 /**
- * The menu actions that hand an item to Claude: a new Cowork task in Claude Desktop, and "Send to QbDCode…",
- * which opens the popup where the instructions are edited and the worktree picked.
+ * The menu actions that hand an item to Claude: a Cowork task that drafts a Jira ticket from it, a new Cowork task
+ * to get it done, and "Send to QbDCode…", which opens the popup where the instructions are edited and the worktree
+ * picked.
  * @param deps What the actions read and do.
- * @returns The actions, Cowork first.
+ * @returns The actions, the Jira draft first.
  */
 export function handoffActions(deps: HandoffDependencies): TodoAction[] {
+  const needsClaudeDesktop = () => (existsSync(CLAUDE_DESKTOP) ? null : "Install Claude Desktop first");
+  const jiraDraft: TodoAction = {
+    id: "jira-draft",
+    label: "Draft a Jira ticket with Claude",
+    unavailable: needsClaudeDesktop,
+    run: (todo) => startJiraDraft(deps, todo),
+  };
   const cowork: TodoAction = {
     id: "cowork",
     label: "Start a Claude Cowork task",
-    unavailable: () => (existsSync(CLAUDE_DESKTOP) ? null : "Install Claude Desktop first"),
+    unavailable: needsClaudeDesktop,
     run: (todo) => startCowork(deps, todo),
   };
   const qbdcode: TodoAction = {
@@ -74,7 +111,7 @@ export function handoffActions(deps: HandoffDependencies): TodoAction[] {
     unavailable: () => qbdcodeUnavailable(deps),
     run: () => Promise.reject(new Error("QbDCode chats are started from the popup.")),
   };
-  return [cowork, qbdcode];
+  return [jiraDraft, cowork, qbdcode];
 }
 
 /**
@@ -139,6 +176,18 @@ export async function sendToQbdcode(deps: HandoffDependencies, path: unknown, te
  */
 export function withPlanFirst(text: string): string {
   return text.trimEnd().endsWith(QBDCODE_PLAN_FIRST) ? text.trimEnd() : `${text.trimEnd()}\n\n${QBDCODE_PLAN_FIRST}`;
+}
+
+/**
+ * Opens a new Cowork task in Claude Desktop that drafts a Jira ticket from the item, ready to send.
+ * @param deps What the actions read and do.
+ * @param todo The item.
+ * @returns Where it went: a Cowork task of its own, listed apart from a plain Cowork send.
+ */
+export async function startJiraDraft(deps: HandoffDependencies, todo: Todo): Promise<Omit<TodoSent, "at">> {
+  const text = cutText(jiraDraftText(todo, deps), MAX_COWORK_CHARS);
+  await deps.openExternal(`claude://cowork/new?q=${encodeURIComponent(text)}`);
+  return { action: "cowork", label: "Claude Cowork · Jira draft", url: COWORK_URL };
 }
 
 /**
@@ -213,7 +262,43 @@ export function listWorktrees(repo: string): Worktree[] {
  * @returns The text.
  */
 export function handoffText(todo: Todo, deps: Pick<HandoffDependencies, "callTranscript">): string {
-  const parts = ["Here's a TODO from my Time Center list. Please help me get it done.", "", todo.markdown];
+  return ["Here's a TODO from my Time Center list. Please help me get it done.", "", todo.markdown, ...callContext(todo, deps)].join("\n");
+}
+
+/**
+ * What a Jira draft task starts with: the draft-only rules, how to write the ticket and where it goes once you say
+ * to create it, then the item and its call.
+ * @param todo The item.
+ * @param deps Where the call's transcript and the Jira settings are read from.
+ * @returns The text.
+ */
+export function jiraDraftText(todo: Todo, deps: Pick<HandoffDependencies, "callTranscript" | "jiraTarget">): string {
+  const target = deps.jiraTarget();
+  // The rules and the guide come before the item, so a long item or call cut to fit the link loses its end, not them.
+  return [
+    JIRA_DRAFT_RULES,
+    "",
+    JIRA_DRAFT_GUIDE,
+    "",
+    `When I say to create it: project ${target.projectKey} on ${target.site}. Ticket types there: ${target.issueTypes.join(", ")}. ` +
+      "Then give me the ticket's link.",
+    "",
+    "The TODO, from my Time Center list:",
+    "",
+    todo.markdown,
+    ...callContext(todo, deps),
+  ].join("\n");
+}
+
+/**
+ * The lines about the call an item came from: which call and when, and what was said around then, marked as other
+ * people's speech.
+ * @param todo The item.
+ * @param deps Where the call's transcript is read from.
+ * @returns The lines, starting with a blank one, or none when the item didn't come from a call.
+ */
+function callContext(todo: Todo, deps: Pick<HandoffDependencies, "callTranscript">): string[] {
+  const parts: string[] = [];
   const source = todo.source;
   if (source) {
     const title = JSON.stringify(source.title.replace(/\s+/g, " "));
@@ -232,7 +317,7 @@ export function handoffText(todo: Todo, deps: Pick<HandoffDependencies, "callTra
       );
     }
   }
-  return parts.join("\n");
+  return parts;
 }
 
 /**

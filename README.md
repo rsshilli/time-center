@@ -7,7 +7,7 @@ Everything stays on your Mac: the activity log, screenshots, recordings and tran
 it except five things, and only when you set them up or use them: a weekly backup of the database to
 your own S3 bucket, meeting titles sent to Claude to sort them into types, the transcripts of the calls
 you ask Claude a question about, the transcript of a call you're watching live on the Recordings tab,
-which Claude reads for action items, and a TODO you choose to make into a Jira ticket.
+which Claude reads for action items. A TODO you hand to Claude (a Cowork task or a QbDCode chat) goes with what was said around it in its call.
 
 ![The My time tab: a timeline of the day by app, and time per category, app, project, website and meeting](docs/screenshots/today.png)
 
@@ -62,7 +62,7 @@ which Claude reads for action items, and a TODO you choose to make into a Jira t
   and press Enter; it formats as you type (**bold**, _italics_, `code`, lists, "[ ] " sub-steps) and is saved
   as Markdown. Select words and press ⌘K to link them, or paste an address over them. Drag ⋮⋮ to reorder an
   item or move it to the other section. Tick items off (they fold into one Done section, tagged Work or
-  Personal), and use an item's ⋯ menu to make a Jira ticket from it. Between Work and Personal, a **Jira** list
+  Personal), and use an item's ⋯ menu to have Claude draft a Jira ticket from it. Between Work and Personal, a **Jira** list
   shows the tickets assigned to you in the sprints going now, each with a link to it; it's read from Jira when
   you open the tab and every five minutes (finished tickets sit dimmed at the bottom, and ones Merged to Master or
   Released to Standard or Validated aren't listed). Click a ticket's status to move it to any state Jira allows. Each action item from a call has an
@@ -158,22 +158,20 @@ and sign in. (To replace the shared client, put the new one in your `.env` and r
 
 The app asks only for read-only calendar access (`calendar.readonly`).
 
-### Jira (making tickets from TODOs)
+### Jira (your sprint's tickets, and drafting new ones)
 
 Under **Settings → Jira**, enter your Jira site (QbDVision's is filled in), the email you sign in with, an
 API token (id.atlassian.com → Security → API tokens), the project key and the types of ticket to choose
 from (QI with Task, Story (FRS), Epic (URS) and Bug to start). **Check and save** tries them against Jira
 before saving. The token is encrypted with a key in your Mac's Keychain and never shown again.
 
-A TODO's ⋯ → **Make a Jira ticket…** opens a popup where Sonnet proposes the type, summary, description,
-assignee (whoever took it on in the call, else you) and Engineering Team (PØD or Platform, unless the item or
-call clearly says another team), from the item and what was said around it in the call. Acceptance criteria
-come as plain bullets. The **Sprint** starts on the team's
-next sprint: the first of its sprints whose start date is still ahead, so never the one under way. Pick
-another sprint, or Backlog, from the list; changing the team moves it to that team's next sprint. Edit any field, search Jira for another assignee, or type a change for Sonnet to make
-("make it a bug for Platform"). A story always gets an **Acceptance Criteria** section; a bug gets **Steps to
-reproduce** and **Expected / Actual**. Nothing goes to Jira until **Create ticket**; the ticket's number then
-shows under the item as a link.
+A TODO's ⋯ → **Draft a Jira ticket with Claude** opens a new Cowork task in Claude Desktop with the item and
+what was said around it in its call. The task starts by telling Claude to draft the ticket only, not to solve,
+investigate or plan the work, and to create nothing in Jira until you say so. It asks for a type from your list,
+a one-line summary, a description under headings (a story's **Acceptance Criteria**, a bug's **Steps to
+reproduce** and **Expected / Actual**), the Engineering Team (PØD or Platform unless the call says otherwise)
+and the assignee if the call shows one, and names the project and site from these settings for when you tell it
+to create the ticket. "Claude Cowork · Jira draft" then shows under the item.
 
 ### Handing a TODO to Claude
 

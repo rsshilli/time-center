@@ -2,7 +2,6 @@ import type { Editor } from "@tiptap/react";
 import { type DragEvent, Fragment, useEffect, useRef, useState } from "react";
 import { TODO_SECTIONS, type Todo, type TodoActionInfo, type TodoDialog, type TodoLayout, type TodoSection } from "../shared/ipc";
 import { readableError } from "./CalendarSettings";
-import { JiraDialog } from "./JiraDialog";
 import { QbdcodeDialog } from "./QbdcodeDialog";
 import { uniqueSends } from "../shared/sends";
 import { sentUrl } from "./sentUrl";
@@ -430,7 +429,6 @@ function TodoRow({ todo, actions, update, onOpenCall, drag, showSection }: RowPr
           </div>
         )}
       </div>
-      {dialog === "jira" && <JiraDialog todo={todo} onClose={() => setDialog(null)} onCreated={(list) => void update(async () => list)} />}
       {dialog === "qbdcode" && (
         <QbdcodeDialog
           prepare={() => window.timeCenter.prepareQbdcodeHandoff(todo.id)}
