@@ -613,6 +613,7 @@ export const MAX_TODO_CHARS = 20_000;
 
 /** IPC channel names shared by the main process and the preload bridge. */
 export const IPC = {
+  logProblem: "app:log-problem",
   getDay: "activity:get-day",
   getRange: "activity:get-range",
   getRules: "rules:get",
@@ -678,6 +679,12 @@ export const IPC = {
 
 /** The API the preload script exposes to the renderer as `window.timeCenter`. */
 export interface TimeCenterApi {
+  /**
+   * Writes something that went wrong on the page to the app's log (~/Library/Logs/Time Center/app.log).
+   * @param source The part of the page, e.g. "todos" or "error".
+   * @param message What happened.
+   */
+  logProblem(source: string, message: string): Promise<void>;
   /** The timeline, screenshots and totals for the local day that contains this moment. */
   getDay(at: number): Promise<DayReport>;
   /** The totals for the local days from one midnight up to another, at most MAX_RANGE_DAYS of them. */

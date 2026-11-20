@@ -34,6 +34,7 @@ import { BackupService } from "./backup/BackupService";
 import { S3ObjectStorage } from "./backup/ObjectStorage";
 import { parseRules } from "./activity/classify";
 import { buildRangeReport } from "./activity/rangeReport";
+import { AppLog } from "./appLog";
 import { RULES_SETTING, registerIpcHandlers } from "./ipcHandlers";
 import { buildWorkLog } from "./recording/workLog";
 import { gateChunkFile, refPath, verdictPath } from "./recording/echoGate";
@@ -192,7 +193,11 @@ async function main(): Promise<void> {
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   });
   const permissions = createPermissions(store);
-  const windows = new WindowManager();
+  const appLog = new AppLog(join(app.getPath("logs"), "app.log"));
+  app.on("child-process-gone", (_event, details) => {
+    appLog.write("app", `A ${details.type} process stopped (${details.reason}, exit code ${details.exitCode}).`);
+  });
+  const windows = new WindowManager((source, message) => appLog.write(source, message));
   const backupService = new BackupService(
     store,
     (settings) => new S3ObjectStorage(settings.bucket, settings.region, settings.profile),
@@ -228,6 +233,7 @@ async function main(): Promise<void> {
     backupState,
     onBackupChanged: () => tray.refresh(backupState.lastError),
     onIgnoredAppsChanged: () => tracker.restart(),
+    log: appLog,
   });
   registerCalendarIpc({
     auth: calendar.auth,

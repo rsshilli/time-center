@@ -8,12 +8,16 @@ import { sentUrl } from "./sentUrl";
 import { SprintTickets } from "./SprintTickets";
 import { TodoEditor } from "./TodoEditor";
 import { hasWords, moveTodo, stepProgress } from "./todoOrder";
+import { describeEmptiedList, describeMissingRows } from "./todoWatch";
 
 /** What the TODO screen needs from the window around it. */
 interface TodosScreenProps {
   /** Opens the Recordings tab on the day of a call an item came from. */
   onOpenCall(at: number): void;
 }
+
+/** How often an open TODO screen checks that it shows every item it holds. */
+const BOARD_CHECK_MS = 15_000;
 
 /** What each section is called on screen. */
 const SECTION_NAMES: Record<TodoSection, string> = { work: "Work", personal: "Personal" };
@@ -28,10 +32,46 @@ export function TodosScreen({ onOpenCall }: TodosScreenProps) {
   const [actions, setActions] = useState<TodoActionInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const shown = useRef(0);
+  const board = useRef<HTMLDivElement | null>(null);
+  const lastReport = useRef<string | null>(null);
+
   useEffect(() => {
-    void window.timeCenter.getTodos().then(setTodos, (failure: unknown) => setError(readableError(failure)));
+    /** Reads the list afresh; an editor you're typing in keeps your text (it ignores reloads while focused). */
+    const reload = () => {
+      void window.timeCenter.getTodos().then(setTodos, (failure: unknown) => setError(readableError(failure)));
+    };
+    reload();
     void window.timeCenter.getTodoActions().then(setActions);
+    // Coming back to the window (from a meeting, say) shows the list as it is now, whatever happened meanwhile.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        reload();
+      }
+    };
+    window.addEventListener("focus", reload);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", reload);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
+
+  useEffect(() => {
+    /** Writes it down if the board shows fewer items than it holds, once per different shortfall. */
+    const check = () => {
+      const held = (todos ?? []).filter((todo) => todo.doneAt === null).length;
+      const rows = [...(board.current?.querySelectorAll<HTMLElement>(".todo-row") ?? [])];
+      const report = describeMissingRows(held, rows.length, rows.filter((row) => row.getBoundingClientRect().height > 0).length);
+      if (report && report !== lastReport.current && document.visibilityState === "visible") {
+        void window.timeCenter.logProblem("todos", report).catch(() => undefined);
+      }
+      lastReport.current = report;
+    };
+    check();
+    const timer = setInterval(check, BOARD_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [todos]);
 
   /**
    * Runs a change and shows the list it answers with, or the reason it failed.
@@ -40,7 +80,12 @@ export function TodosScreen({ onOpenCall }: TodosScreenProps) {
    */
   const update = async (change: () => Promise<Todo[]>): Promise<boolean> => {
     try {
-      setTodos(await change());
+      const list = await change();
+      const emptied = describeEmptiedList(shown.current, list.length);
+      if (emptied) {
+        void window.timeCenter.logProblem("todos", emptied).catch(() => undefined);
+      }
+      setTodos(list);
       setError(null);
       return true;
     } catch (failure) {
@@ -54,6 +99,7 @@ export function TodosScreen({ onOpenCall }: TodosScreenProps) {
   }
   const open = todos.filter((todo) => todo.doneAt === null);
   const done = todos.filter((todo) => todo.doneAt !== null);
+  shown.current = todos.length;
 
   return (
     <section className="todos">
@@ -64,7 +110,9 @@ export function TodosScreen({ onOpenCall }: TodosScreenProps) {
         Drag an item's ⋮⋮ to reorder it or move it between Work and Personal.
       </p>
       {error && <p className="error">{error}</p>}
-      <TodoBoard todos={open} actions={actions} update={update} onOpenCall={onOpenCall} />
+      <div ref={board}>
+        <TodoBoard todos={open} actions={actions} update={update} onOpenCall={onOpenCall} />
+      </div>
       {done.length > 0 && (
         <details className="todo-done">
           <summary>

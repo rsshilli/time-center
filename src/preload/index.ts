@@ -6,6 +6,7 @@ import { IPC, type TimeCenterApi } from "../shared/ipc";
  * forwarded over IPC. The renderer gets no direct access to Node or Electron.
  */
 const api: TimeCenterApi = {
+  logProblem: (source, message) => ipcRenderer.invoke(IPC.logProblem, source, message),
   getDay: (at) => ipcRenderer.invoke(IPC.getDay, at),
   getRange: (from, to) => ipcRenderer.invoke(IPC.getRange, from, to),
   getRules: () => ipcRenderer.invoke(IPC.getRules),

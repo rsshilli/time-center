@@ -1,6 +1,7 @@
 import { ClipboardItem, clipboard, ipcMain, nativeImage } from "electron";
 import { IPC, MAX_RANGE_DAYS, type BackupSettingsInput, type BackupStatus, type PermissionKind } from "../shared/ipc";
 import type { ActivityStore } from "./activity/ActivityStore";
+import { type AppLog, assertPageProblem } from "./appLog";
 import { assertRules, parseRules } from "./activity/classify";
 import { buildDayReport } from "./activity/dayReport";
 import { buildRangeReport } from "./activity/rangeReport";
@@ -26,6 +27,8 @@ export interface IpcDependencies {
   onBackupChanged: () => void;
   /** Restarts the window helper so a new ignored-apps list takes effect. */
   onIgnoredAppsChanged: () => void;
+  /** Where problems the page reports are written. */
+  log: Pick<AppLog, "write">;
 }
 
 /** The setting that holds the category rules as JSON. */
@@ -40,6 +43,10 @@ const PERMISSION_KINDS: readonly PermissionKind[] = ["accessibility", "screen", 
  * @param deps The services to answer from.
  */
 export function registerIpcHandlers(deps: IpcDependencies): void {
+  ipcMain.handle(IPC.logProblem, (_event, source: unknown, message: unknown) => {
+    const problem = assertPageProblem(source, message);
+    deps.log.write(problem.source, problem.message);
+  });
   ipcMain.handle(IPC.getDay, (_event, at: unknown) =>
     buildDayReport(deps.activity, parseRules(deps.store.getSetting(RULES_SETTING)), assertMoment(at), (from, to) =>
       deps.calendar.listTypedEvents(from, to),

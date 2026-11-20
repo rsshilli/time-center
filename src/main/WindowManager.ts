@@ -13,6 +13,9 @@ export type Screen = "dashboard" | "recordings" | "todos" | "permissions" | "set
 export class WindowManager {
   private window: BrowserWindow | null = null;
 
+  /** @param log Where a page that dies or hangs is written down. */
+  constructor(private readonly log: (source: string, message: string) => void = () => {}) {}
+
   /**
    * Shows a screen, creating the window if it isn't open and focusing it either way.
    * @param screen Which screen to show.
@@ -73,6 +76,15 @@ export class WindowManager {
         openIfExternal(url);
       }
     });
+    window.webContents.on("render-process-gone", (_event, details) => {
+      this.log("window", `The page stopped (${details.reason}, exit code ${details.exitCode}); reloading it.`);
+      // Reloading keeps the address, so the same screen comes back with its data read afresh.
+      if (!window.isDestroyed()) {
+        window.webContents.reload();
+      }
+    });
+    window.on("unresponsive", () => this.log("window", "The page stopped responding."));
+    window.on("responsive", () => this.log("window", "The page is responding again."));
     window.on("closed", () => {
       this.window = null;
     });
