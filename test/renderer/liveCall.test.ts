@@ -20,7 +20,7 @@ const call = (fields: Partial<CallRecording>): CallRecording => ({
   speakers: [],
   nameChoices: [],
   actionItems: [],
-  actionItemsBehind: false,
+  actionItemsScannedAt: null,
   ...fields,
 });
 
@@ -33,12 +33,6 @@ describe("liveCall", () => {
   it("should keep a call that just ended while its last words are transcribed, but not for long", () => {
     const calls = [call({ id: 3, waitingChunks: 2 })];
     expect(liveCall(calls, NINE + 35 * MIN)?.id).toBe(3);
-    expect(liveCall(calls, NINE + 41 * MIN)).toBeNull();
-  });
-
-  it("should keep a call that just ended until Haiku has read its last words", () => {
-    const calls = [call({ id: 4, actionItemsBehind: true })];
-    expect(liveCall(calls, NINE + 31 * MIN)?.id).toBe(4);
     expect(liveCall(calls, NINE + 41 * MIN)).toBeNull();
   });
 

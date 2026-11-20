@@ -43,11 +43,11 @@ which Claude reads for action items. A TODO you hand to Claude (a Cowork task or
   "maybe" that overlaps it. Pick a day in either the My time tab or the Recordings tab, and the other tab shows the same day.
 - **Action items during a call.** While a call is going, the Recordings tab shows its transcript on the
   left as it's heard and, on the right, the five newest possible action items ("You: send Dana the test
-  cards"), found by Claude Haiku. Haiku only reads the call while that tab is open and the window is in
-  view, at most once a minute, plus a last look in the few minutes after the call ends while its final
-  words are transcribed. The items stay with the call, under it in the list of earlier calls. Click ✕ on any
-  suggested TODO (here, under a call, or found by a question) to dismiss it, with Undo; Haiku won't suggest it
-  again for that call.
+  cards"). Nothing reads the call in the background: press **Scan for TODOs** (on the live call, or under any
+  earlier call) and Claude Sonnet reads it then. A new scan adds to what earlier scans found and never takes
+  any away. The items stay with the call, under it in the list of earlier calls. Click ✕ on any suggested
+  TODO (here, under a call, or found by a question) to dismiss it, with Undo; a scan won't suggest it again
+  for that call.
 - **Catch me up.** Stopped listening? Above the live call, pick 2, 5 or 10 minutes and Claude Haiku sums up what
   was said in that time in a few bullets, starting with anything someone asked you.
 - **Ask about your calls.** At the top of the Recordings tab, type a question, or click the mic to say

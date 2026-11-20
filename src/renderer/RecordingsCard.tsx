@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CallRecording, RecordingsReport } from "../shared/ipc";
 import { CallAskBox } from "./AskCard";
 import { readableError } from "./CalendarSettings";
-import { ActionItemList } from "./LiveCallCard";
+import { ScannedActionItems } from "./LiveCallCard";
 import { formatClock, groupTurns, transcriptText } from "../shared/transcript";
 import { SPEAKERS_CHANGED, TranscriptTurns } from "./TranscriptTurns";
 
@@ -173,7 +173,7 @@ function RecordingItem({ recording }: { recording: CallRecording }) {
           <section className="recording-actions-found">
             <h3>Possible TODOs</h3>
             {/* Always there, even when empty, so Undo stays after the last one is dismissed and the day reloads. */}
-            <ActionItemList items={recording.actionItems} recording={recording} empty="None found in this call." />
+            <ScannedActionItems recording={recording} empty="None found in this call." />
           </section>
           <section>
             <h3>Transcript</h3>

@@ -1,69 +1,66 @@
-import { CALL_FINISHING_MS, type ActionItem, type ActionItemsReport, type CallSpeaker } from "../../shared/ipc";
+import type { ActionItem, ActionItemsReport, CallSpeaker } from "../../shared/ipc";
 import { formatClock, groupTurns, speakerLabel, type Turn } from "../../shared/transcript";
 import type { HaikuClient } from "../calendar/BedrockHaiku";
 import type { ActionItemStore, StoredActionItems } from "./ActionItemStore";
 import type { RecordingStore } from "./RecordingStore";
 
-/** The soonest Haiku looks at a call again; the Recordings tab asks more often than that. */
-export const MIN_CHECK_GAP_MS = 60_000;
-
-/** The most action items kept for one call. */
+/** The most action items one scan answers with. */
 export const MAX_ITEMS = 10;
 
 /** The most transcript sent in one look (~25k tokens); a longer call sends its latest part. */
 export const MAX_TRANSCRIPT_CHARS = 100_000;
 
+/** The most items saved for one call: the latest scan's answer plus the earlier ones it left out. */
+export const MAX_KEPT = 30;
+
 /** The longest item kept, in characters; anything longer is cut. */
 const MAX_ITEM_CHARS = 200;
 
-/** The tool Haiku answers through, so its reply is a list rather than prose. */
+/** The tool the model answers through, so its reply is a list rather than prose. */
 const ANSWER_TOOL = "record_action_items";
 
-/** What Haiku should look for. */
+/** What the model should look for. */
 const SYSTEM_PROMPT = [
-  "You read the transcript of a call that is still going and list its potential action items: concrete " +
+  "You read the transcript of a call (it may still be going) and list its potential action items: concrete " +
     "things someone said they would do, agreed to do, or was asked to do (send something, follow up, fix, " +
     "decide, book). Not topics that were only discussed, and not things already done during the call.",
   'In the transcript, "You" is the user\'s own microphone and "Them" is everyone else (speech recognition ' +
     "can't tell the other people apart, and may mishear words).",
   'Write each item as a short instruction that starts with who will do it when that\'s clear, e.g. "You: send ' +
     'Dana the sandbox keys" or "Them: check the invoice total". Use names when the call says them.',
-  "Keep the wording of items found earlier unless the call changed them; drop any the call has since " +
-    `cancelled or finished. Give each item the number of the turn where it was said. At most ${MAX_ITEMS} items; ` +
-    "an empty list is fine.",
+  "List the items found earlier again, keeping their wording unless the call changed them, plus any new ones. " +
+    `Give each item the number of the turn where it was said. At most ${MAX_ITEMS} items; an empty list is fine.`,
+  `Answer only by calling the ${ANSWER_TOOL} tool, once, with no other text.`,
 ].join("\n");
 
 /** What finding action items needs, injected for tests. */
 export interface ActionItemDeps {
   recordings: Pick<RecordingStore, "getRecording" | "listLines">;
   store: Pick<ActionItemStore, "getItems" | "saveItems" | "listDismissed">;
-  /** Haiku on Bedrock. */
-  haiku: Pick<HaikuClient, "invoke">;
+  /** Sonnet on Bedrock. */
+  model: Pick<HaikuClient, "invoke">;
   /** A call's speakers, so the transcript names who said what. */
   speakers(recordingId: number): CallSpeaker[];
   now(): number;
 }
 
 /**
- * Finds a call's potential action items with Haiku while you watch it on the Recordings tab. The tab asks
- * every few seconds; Haiku is only called when the call has new words and a minute has passed since the last
- * look, and only one look per call runs at a time. Results are saved, so the call keeps them afterwards.
+ * Scans a call for potential action items with Sonnet when you press Scan for TODOs — on the live call or
+ * any past one. Nothing runs in the background. One scan per call runs at a time; a second press shares it.
+ * Results are saved, so the call keeps them afterwards.
  */
 export class ActionItemFinder {
   private readonly running = new Map<number, Promise<ActionItemsReport>>();
-  private readonly problems = new Map<number, string>();
-  /** When each call was last sent to Haiku, failed tries included, so a failure isn't retried every poll. */
-  private readonly lastTry = new Map<number, number>();
 
-  /** @param deps The stores, Haiku and the clock. */
+  /** @param deps The stores, the model and the clock. */
   constructor(private readonly deps: ActionItemDeps) {}
 
   /**
-   * Brings a call's action items up to date if it's time to, and returns them.
+   * Scans a call now, or joins the scan of it already running.
    * @param recordingId The call.
-   * @returns Its items, newest first, and why the last look failed if it did.
+   * @returns Its items, newest first. Throws when the model can't be reached; the saved items stay.
    */
-  refresh(recordingId: number): Promise<ActionItemsReport> {
+  scan(recordingId: number): Promise<ActionItemsReport> {
     const running = this.running.get(recordingId);
     if (running) {
       return running;
@@ -74,81 +71,66 @@ export class ActionItemFinder {
   }
 
   /**
-   * Sends the call to Haiku when it has new words and the last look was over a minute ago. Once the call
-   * has ended there's no wait, so its last words get looked at before the live card goes; a call that ended
-   * longer ago than CALL_FINISHING_MS is never sent at all.
+   * Sends the call's latest part to the model with the items found so far, and saves what it finds on top.
    * @param recordingId The call.
    * @returns Its items.
    */
   private async look(recordingId: number): Promise<ActionItemsReport> {
-    const recording = this.deps.recordings.getRecording(recordingId);
-    if (!recording) {
+    if (!this.deps.recordings.getRecording(recordingId)) {
       throw new Error("That call isn't recorded.");
     }
-    // Dismissed items included: they stay saved, hidden, so Undo can bring them back after Haiku looks again.
+    // Dismissed items included: they stay saved, hidden, so Undo can bring them back after another scan.
     const saved = this.deps.store.getItems(recordingId, true);
     const lines = this.deps.recordings.listLines(recordingId);
-    const heardUntil = Math.max(0, ...lines.map((line) => line.end));
+    if (lines.length === 0) {
+      throw new Error("Nothing has been said in this call yet.");
+    }
     const now = this.deps.now();
-    if (recording.end !== null && now - recording.end > CALL_FINISHING_MS) {
-      return this.report(recordingId, saved);
-    }
-    const lastTry = this.lastTry.get(recordingId) ?? saved?.checkedAt ?? 0;
-    const tooSoon = recording.end === null && now - lastTry < MIN_CHECK_GAP_MS;
-    const nothingNew =
-      lines.length === 0 || (saved !== null && heardUntil <= saved.coveredUntil && lines.length <= saved.coveredLines);
-    if (nothingNew || tooSoon) {
-      return this.report(recordingId, saved);
-    }
-    this.lastTry.set(recordingId, now);
-    try {
-      const speakers = this.deps.speakers(recordingId);
-      const turns = latestTurns(groupTurns(lines, speakers), MAX_TRANSCRIPT_CHARS);
-      const dismissed = this.deps.store.listDismissed(recordingId);
-      const shown = (saved?.items ?? []).filter((item) => !isDismissed(item, dismissed));
-      const parked = (saved?.items ?? []).filter((item) => isDismissed(item, dismissed));
-      // Items said before the part that was sent can't be re-found, so they're kept as they were, and not
-      // shown to Haiku, which would otherwise restate them inside the part it read.
-      const cutOff = turns[0]?.start ?? 0;
-      const earlier = shown.filter((item) => item.saidAt >= cutOff);
-      const kept = shown.filter((item) => item.saidAt < cutOff);
-      // Ones you dismissed are shown to Haiku so it doesn't suggest them again, and left out if it does anyway.
-      // Matched on words alone here: the same words in the same call are the same suggestion, even when Haiku
-      // places it on a neighbouring turn this time.
-      const found = readItems(await this.deps.haiku.invoke(buildRequest(turns, earlier, speakers, dismissed)), turns).filter(
-        (item) => !dismissed.some((gone) => gone.text === item.text),
-      );
-      const items = [...found, ...kept.filter((item) => !found.some((match) => match.text === item.text))].slice(0, MAX_ITEMS);
-      const next: StoredActionItems = {
-        recordingId,
-        items: [...items, ...parked],
-        coveredUntil: heardUntil,
-        coveredLines: lines.length,
-        checkedAt: now,
-      };
-      this.deps.store.saveItems(next);
-      this.problems.delete(recordingId);
-      return this.report(recordingId, next);
-    } catch (error) {
-      this.problems.set(recordingId, error instanceof Error ? error.message : String(error));
-      return this.report(recordingId, saved);
-    }
-  }
-
-  /**
-   * Puts a call's items, less the ones you dismissed, and its last problem together for the tab.
-   * @param recordingId The call.
-   * @param saved Its saved items, dismissed ones included, if any.
-   * @returns The report.
-   */
-  private report(recordingId: number, saved: StoredActionItems | null): ActionItemsReport {
+    const speakers = this.deps.speakers(recordingId);
+    const turns = latestTurns(groupTurns(lines, speakers), MAX_TRANSCRIPT_CHARS);
     const dismissed = this.deps.store.listDismissed(recordingId);
-    return {
-      items: (saved?.items ?? []).filter((item) => !isDismissed(item, dismissed)),
-      checkedAt: saved?.checkedAt ?? null,
-      problem: this.problems.get(recordingId) ?? null,
+    const shown = (saved?.items ?? []).filter((item) => !isDismissed(item, dismissed));
+    const parked = (saved?.items ?? []).filter((item) => isDismissed(item, dismissed));
+    // Items said before the part that was sent can't be re-found, so they're kept as they were, and not
+    // shown to the model, which would otherwise restate them inside the part it read.
+    const cutOff = turns[0]?.start ?? 0;
+    const earlier = shown.filter((item) => item.saidAt >= cutOff);
+    const kept = shown.filter((item) => item.saidAt < cutOff);
+    // Ones you dismissed are shown to the model so it doesn't suggest them again, and left out if it does anyway.
+    // Matched on words alone here: the same words in the same call are the same suggestion, even when the model
+    // places it on a neighbouring turn this time.
+    const found = readItems(await this.deps.model.invoke(buildRequest(turns, earlier, speakers, dismissed)), turns).filter(
+      (item) => !dismissed.some((gone) => gone.text === item.text),
+    );
+    // A scan can add and reword, never take away: one empty or short answer used to wipe the whole list in the
+    // middle of a call. Only Dismiss removes a suggestion.
+    const items = keepEarlier(found, [...earlier, ...kept]).slice(0, MAX_KEPT);
+    const next: StoredActionItems = {
+      recordingId,
+      items: [...items, ...parked],
+      coveredUntil: Math.max(0, ...lines.map((line) => line.end)),
+      coveredLines: lines.length,
+      checkedAt: now,
     };
+    this.deps.store.saveItems(next);
+    return { items, checkedAt: now };
   }
+}
+
+/**
+ * Puts Haiku's new answer together with the items it had before, so nothing it leaves out goes missing. An
+ * earlier item stays unless the answer has the same words, or rewords it: the answer has at least as many items
+ * said at that moment as there were before.
+ * @param found Haiku's items, newest first.
+ * @param before The call's items before this look.
+ * @returns Them all, newest first.
+ */
+export function keepEarlier(found: readonly ActionItem[], before: readonly ActionItem[]): ActionItem[] {
+  const count = (list: readonly ActionItem[], saidAt: number) => list.filter((item) => item.saidAt === saidAt).length;
+  const missing = before.filter(
+    (item) => !found.some((match) => match.text === item.text) && count(found, item.saidAt) < count(before, item.saidAt),
+  );
+  return [...found, ...missing].sort((a, b) => b.saidAt - a.saidAt);
 }
 
 /**
@@ -230,7 +212,9 @@ export function buildRequest(
         },
       },
     ],
-    tool_choice: { type: "tool", name: ANSWER_TOOL },
+    // Sonnet 5.5 on Bedrock refuses a forced tool ("type tool and any are not supported for this model", probe
+    // 2026-11-20), so it's left to choose, and told to answer only through the tool.
+    tool_choice: { type: "auto" },
     messages: [
       {
         role: "user",

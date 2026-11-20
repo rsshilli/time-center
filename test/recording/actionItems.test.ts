@@ -2,8 +2,8 @@ import { ActionItemStore } from "../../src/main/recording/ActionItemStore";
 import {
   ActionItemFinder,
   MAX_ITEMS,
-  MIN_CHECK_GAP_MS,
   buildRequest,
+  keepEarlier,
   latestTurns,
   readItems,
 } from "../../src/main/recording/actionItems";
@@ -34,7 +34,7 @@ describe("actionItems", () => {
     items = new ActionItemStore(store.db);
     now = START + 10 * MIN;
     invoke = vi.fn<(body: object) => Promise<unknown>>(async () => reply([{ turn: 1, text: "  You:  send Dana the keys " }]));
-    finder = new ActionItemFinder({ recordings, store: items, haiku: { invoke }, speakers: () => [], now: () => now });
+    finder = new ActionItemFinder({ recordings, store: items, model: { invoke }, speakers: () => [], now: () => now });
     id = recordings.insertRecording(START, "/tmp/none");
   });
 
@@ -47,86 +47,67 @@ describe("actionItems", () => {
     recordings.insertLines(id, [{ side, start: at, end: at + 5_000, text }]);
   };
 
-  it("should ask Haiku about a call with words, save the items and give them back", async () => {
+  it("should scan a call with words, save the items and give them back", async () => {
     say("them", START, "Can you send me the sandbox keys?");
     say("me", START + MIN, "Sure, I'll send them today.");
 
-    const report = await finder.refresh(id);
+    const report = await finder.scan(id);
 
-    expect(report).toEqual({ items: [{ text: "You: send Dana the keys", saidAt: START + MIN }], checkedAt: now, problem: null });
+    expect(report).toEqual({ items: [{ text: "You: send Dana the keys", saidAt: START + MIN }], checkedAt: now });
     expect(items.getItems(id)).toEqual({ recordingId: id, items: report.items, coveredUntil: START + MIN + 5_000, coveredLines: 2, checkedAt: now });
   });
 
-  it("should not call Haiku for a call with no words, nothing new, or within a minute of the last look", async () => {
-    expect(await finder.refresh(id)).toEqual({ items: [], checkedAt: null, problem: null });
+  it("should refuse to scan a call with no words, without asking the model", async () => {
+    await expect(finder.scan(id)).rejects.toThrow(/Nothing has been said/);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("should ask the model every time you scan, even straight after the last scan", async () => {
     say("them", START, "Hello");
-    say("me", START + MIN, "Hi");
-    await finder.refresh(id);
-    say("them", START + 2 * MIN, "One more thing");
-    now += MIN_CHECK_GAP_MS - 1;
-    await finder.refresh(id);
+    await finder.scan(id);
+    await finder.scan(id);
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("should scan a call that ended long ago", async () => {
+    say("them", START, "Hello");
+    recordings.finishRecording(id, START + MIN);
+    now += 24 * 60 * MIN;
+    await finder.scan(id);
     expect(invoke).toHaveBeenCalledTimes(1);
-    now += 1;
-    await finder.refresh(id);
-    expect(invoke).toHaveBeenCalledTimes(2);
-    now += MIN_CHECK_GAP_MS * 2;
-    await finder.refresh(id);
-
-    expect(invoke).toHaveBeenCalledTimes(2);
-    say("them", START + 3 * MIN, "Last thing");
-    await finder.refresh(id);
-    expect(invoke).toHaveBeenCalledTimes(3);
   });
 
-  it("should count a line that arrives late, timed before the last one read, as new", async () => {
-    say("them", START + 2 * MIN, "Their side, transcribed first");
-    await finder.refresh(id);
-    say("me", START + MIN, "My side, transcribed later: I'll send the keys");
-    now += MIN_CHECK_GAP_MS;
-
-    await finder.refresh(id);
-
-    expect(invoke).toHaveBeenCalledTimes(2);
-  });
-
-  it("should run one look at a time per call, sharing it with a second ask", async () => {
+  it("should run one scan at a time per call, sharing it with a second press", async () => {
     say("them", START, "Hello");
-    const [first, second] = await Promise.all([finder.refresh(id), finder.refresh(id)]);
+    const [first, second] = await Promise.all([finder.scan(id), finder.scan(id)]);
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(second).toEqual(first);
   });
 
-  it("should keep the saved items and report the problem when Haiku fails, then wait a minute to retry", async () => {
+  it("should keep the saved items and pass on the problem when the model fails", async () => {
     say("them", START, "Hello");
     say("me", START + MIN, "Hi");
-    await finder.refresh(id);
-    say("them", START + 2 * MIN, "Bye");
-    now += MIN_CHECK_GAP_MS;
+    await finder.scan(id);
     invoke.mockRejectedValueOnce(new Error("Bedrock said: throttled"));
 
-    const failed = await finder.refresh(id);
-    const soon = await finder.refresh(id);
+    await expect(finder.scan(id)).rejects.toThrow("Bedrock said: throttled");
 
-    expect(failed.problem).toBe("Bedrock said: throttled");
-    expect(failed.items).toEqual([{ text: "You: send Dana the keys", saidAt: START + MIN }]);
-    expect(soon.problem).toBe("Bedrock said: throttled");
-    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(items.getItems(id)?.items).toEqual([{ text: "You: send Dana the keys", saidAt: START + MIN }]);
   });
 
   it("should send the numbered turns and the items found earlier", async () => {
     say("them", START, "Can you send the keys?");
     say("me", START + MIN, "Yes.");
-    await finder.refresh(id);
+    await finder.scan(id);
     say("them", START + 2 * MIN, "And the invoice.");
-    now += MIN_CHECK_GAP_MS;
 
-    await finder.refresh(id);
+    await finder.scan(id);
 
     const body = invoke.mock.calls[1][0] as { messages: { content: string }[]; tool_choice: unknown };
     expect(body.messages[0].content).toContain("[0] 10:00 AM Them: Can you send the keys?");
     expect(body.messages[0].content).toContain("[2] 10:02 AM Them: And the invoice.");
     expect(body.messages[0].content).toContain("- You: send Dana the keys (said at 10:01 AM)");
-    expect(body.tool_choice).toEqual({ type: "tool", name: "record_action_items" });
+    expect(body.tool_choice).toEqual({ type: "auto" });
   });
 
   it("should keep earlier items from before the part of a long call that was sent", async () => {
@@ -136,7 +117,7 @@ describe("actionItems", () => {
     say("them", START + 2 * MIN, "Thanks.");
     invoke.mockResolvedValueOnce(reply([{ turn: 0, text: "You: do it" }]));
 
-    const report = await finder.refresh(id);
+    const report = await finder.scan(id);
 
     expect(report.items).toEqual([
       { text: "You: do it", saidAt: START + MIN },
@@ -149,7 +130,7 @@ describe("actionItems", () => {
     say("them", START, "x".repeat(150_000) + " please send the deck");
     invoke.mockResolvedValueOnce(reply([{ turn: 0, text: "You: send the deck" }]));
 
-    const report = await finder.refresh(id);
+    const report = await finder.scan(id);
 
     const body = invoke.mock.calls[0][0] as { messages: { content: string }[] };
     expect(body.messages[0].content).toContain("please send the deck");
@@ -174,7 +155,7 @@ describe("actionItems", () => {
     say("me", START + MIN, "Sure.");
     invoke.mockResolvedValueOnce(reply([{ turn: 0, text: "Old item" }]));
 
-    const report = await finder.refresh(id);
+    const report = await finder.scan(id);
 
     const body = invoke.mock.calls[0][0] as { messages: { content: string }[] };
     expect(body.messages[0].content).not.toContain("- Old item");
@@ -182,23 +163,21 @@ describe("actionItems", () => {
     expect(report.items.filter((item) => item.text === "Old item")).toHaveLength(1);
   });
 
-  it("should take a final look at once when the call has ended, and never after it's long over", async () => {
-    say("them", START, "Hello");
-    await finder.refresh(id);
-    recordings.finishRecording(id, now);
-    say("me", START + 2 * MIN, "I'll send the notes");
-    now += 5_000;
-    await finder.refresh(id);
-    expect(invoke).toHaveBeenCalledTimes(2);
+  it("should keep every earlier item when Haiku answers mid-call with an empty list", async () => {
+    say("them", START, "Can you send the keys?");
+    say("me", START + MIN, "Yes.");
+    await finder.scan(id);
+    say("them", START + 2 * MIN, "Great, talk soon.");
+    invoke.mockResolvedValueOnce(reply([]));
 
-    say("them", START + 3 * MIN, "One more");
-    now += 11 * MIN;
-    await finder.refresh(id);
-    expect(invoke).toHaveBeenCalledTimes(2);
+    const report = await finder.scan(id);
+
+    expect(report.items).toEqual([{ text: "You: send Dana the keys", saidAt: START + MIN }]);
+    expect(items.getItems(id)?.items).toEqual(report.items);
   });
 
   it("should refuse a call that isn't recorded", async () => {
-    await expect(finder.refresh(999)).rejects.toThrow(/isn't recorded/);
+    await expect(finder.scan(999)).rejects.toThrow(/isn't recorded/);
   });
 });
 
@@ -238,6 +217,25 @@ describe("readItems", () => {
   it("should refuse a reply with no list", () => {
     expect(() => readItems({ content: [{ type: "text", text: "Here you go" }] }, turns)).toThrow(/list of action items/);
     expect(() => readItems(null, turns)).toThrow(/list of action items/);
+  });
+});
+
+describe("keepEarlier", () => {
+  const a = { text: "You: send the keys", saidAt: 2 };
+  const b = { text: "Them: check the invoice", saidAt: 1 };
+
+  it("should keep earlier items the answer left out, newest first", () => {
+    expect(keepEarlier([], [a, b])).toEqual([a, b]);
+    expect(keepEarlier([b], [a])).toEqual([a, b]);
+  });
+
+  it("should let a reworded item said at the same moment replace the old wording", () => {
+    const reworded = { text: "You: send Dana the sandbox keys", saidAt: 2 };
+    expect(keepEarlier([reworded], [a, b])).toEqual([reworded, b]);
+  });
+
+  it("should not keep two copies of the same words", () => {
+    expect(keepEarlier([a], [a, b])).toEqual([a, b]);
   });
 });
 

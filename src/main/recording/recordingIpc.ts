@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain } from "electron";
+import { ipcMain } from "electron";
 import {
   CALL_QUESTION_SCOPES,
   IPC,
@@ -45,8 +45,8 @@ export interface RecordingIpcDependencies {
   actionItems: Pick<ActionItemStore, "getItems">;
   /** Each call's speakers, and the people you've named. */
   speakers: Pick<SpeakerStore, "listSpeakers" | "listVoices">;
-  /** Brings a call's action items up to date with Haiku, when it's time to. */
-  refreshActionItems(recordingId: number): Promise<ActionItemsReport>;
+  /** Scans a call for action items with Sonnet. */
+  scanActionItems(recordingId: number): Promise<ActionItemsReport>;
   /** Summarises the last few minutes of a call with Haiku. */
   catchUp(recordingId: number, minutes: CatchUpMinutes): Promise<CatchUp>;
   /** The suggested TODOs you dismissed. */
@@ -77,14 +77,7 @@ export function registerRecordingIpc(deps: RecordingIpcDependencies): void {
   ipcMain.handle(IPC.askAboutCalls, (_event, request: unknown) => deps.ask(assertQuestionRequest(request)));
   ipcMain.handle(IPC.getCallQuestions, () => deps.listQuestions());
   ipcMain.handle(IPC.transcribeDictation, (_event, wav: unknown) => deps.dictate(assertDictation(wav)));
-  ipcMain.handle(IPC.refreshActionItems, (event, id: unknown) => {
-    // Haiku reads a call only while you can see it: a hidden or minimized window asking is refused.
-    const window = BrowserWindow.fromWebContents(event.sender);
-    if (!window?.isVisible() || window.isMinimized()) {
-      throw new Error("Action items are only looked for while the window is in view.");
-    }
-    return deps.refreshActionItems(assertRowId(id));
-  });
+  ipcMain.handle(IPC.scanActionItems, (_event, id: unknown) => deps.scanActionItems(assertRowId(id)));
   ipcMain.handle(IPC.catchUpOnCall, (_event, id: unknown, minutes: unknown) => deps.catchUp(assertRowId(id), assertCatchUpMinutes(minutes)));
   ipcMain.handle(IPC.dismissSuggestion, (_event, suggestion: unknown) => deps.dismissed.dismiss(assertSuggestionRef(suggestion), deps.now()));
   ipcMain.handle(IPC.restoreSuggestion, (_event, suggestion: unknown) => deps.dismissed.restore(assertSuggestionRef(suggestion)));
@@ -164,7 +157,7 @@ export function buildRecordingsReport(
       speakers: describeSpeakers(deps.speakers.listSpeakers(recording.id), names),
       nameChoices: nameChoices(invitees,voices.map((voice) => voice.name)),
       actionItems: saved?.items ?? [],
-      actionItemsBehind: saved !== null && lines.length > saved.coveredLines,
+      actionItemsScannedAt: saved?.checkedAt ?? null,
     };
   });
   return { recordings, transcriberProblem: deps.transcriber.currentProblem() };

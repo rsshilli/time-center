@@ -8,9 +8,6 @@ import { CatchUpBar } from "./CatchUpBar";
 import { DismissButton } from "./DismissButton";
 import { useDismissals } from "./useDismissals";
 
-/** How often the card asks for fresh action items; the main process calls Haiku at most once a minute. */
-const ACTION_POLL_MS = 15_000;
-
 /** Action items shown, newest first. */
 export const ITEMS_SHOWN = 5;
 
@@ -24,40 +21,9 @@ const FOLLOW_SLACK_PX = 40;
  */
 export function LiveCallCard({ recording }: { recording: CallRecording }) {
   const turns = groupTurns(recording.lines, recording.speakers);
-  const [items, setItems] = useState<ActionItemsReport>({ items: recording.actionItems, checkedAt: null, problem: null });
-  const [failure, setFailure] = useState<string | null>(null);
   const transcript = useRef<HTMLOListElement>(null);
   /** Whether you're at the bottom of the transcript, so new words scroll into view; false once you scroll up. */
   const following = useRef(true);
-
-  useEffect(() => {
-    let current = true;
-    /** Asks for the call's action items, unless the window is hidden. */
-    const refresh = async () => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
-      try {
-        const report = await window.timeCenter.refreshActionItems(recording.id);
-        if (current) {
-          setItems(report);
-          setFailure(null);
-        }
-      } catch (caught) {
-        if (current) {
-          setFailure(readableError(caught));
-        }
-      }
-    };
-    void refresh();
-    const timer = setInterval(() => void refresh(), ACTION_POLL_MS);
-    document.addEventListener("visibilitychange", refresh);
-    return () => {
-      current = false;
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", refresh);
-    };
-  }, [recording.id]);
 
   useEffect(() => {
     const list = transcript.current;
@@ -74,7 +40,6 @@ export function LiveCallCard({ recording }: { recording: CallRecording }) {
     }
   };
 
-  const problem = failure ?? items.problem;
   return (
     <div className="card live-call">
       <div className="live-head">
@@ -99,24 +64,60 @@ export function LiveCallCard({ recording }: { recording: CallRecording }) {
         </div>
         <div className="live-actions">
           <h3>Possible action items</h3>
-          {/* Always there, even when empty, so Undo stays after the last item is dismissed and the list reloads. */}
-          <ActionItemList
-            items={items.items}
-            limit={ITEMS_SHOWN}
+          <ScannedActionItems
             recording={recording}
-            empty={turns.length === 0 ? "Waiting for the call's first words." : "None yet."}
+            limit={ITEMS_SHOWN}
+            empty={turns.length === 0 ? "Waiting for the call's first words." : "None found yet."}
           />
-          {problem ? (
-            <p className="message">Couldn't check for action items: {problem}</p>
-          ) : (
-            <p className="muted live-note">
-              Claude Haiku looks again each minute there's something new, while this tab is open
-              {items.checkedAt !== null && ` · last looked at ${formatClock(items.checkedAt)}`}.
-            </p>
-          )}
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * A call's action items with a Scan for TODOs button: Sonnet reads the call when you press it, and nothing runs
+ * otherwise. A scan keeps what was found before and adds to it.
+ * @param props.recording The call, live or past.
+ * @param props.empty What to say when a scan found none.
+ * @param props.limit The most shown.
+ */
+export function ScannedActionItems({ recording, empty, limit }: { recording: CallRecording; empty: string; limit?: number }) {
+  const [scanned, setScanned] = useState<ActionItemsReport | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  // The day reloads every few seconds; whichever list is newer, this scan's answer or the saved one, is shown.
+  const fresher = scanned !== null && scanned.checkedAt >= (recording.actionItemsScannedAt ?? 0);
+  const items = fresher ? scanned.items : recording.actionItems;
+  const scannedAt = fresher ? scanned.checkedAt : recording.actionItemsScannedAt;
+
+  /** Asks Sonnet to read the call now. */
+  const scan = async () => {
+    setScanning(true);
+    try {
+      setScanned(await window.timeCenter.scanActionItems(recording.id));
+      setProblem(null);
+    } catch (caught) {
+      setProblem(readableError(caught));
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  return (
+    <>
+      {/* Always there, even when empty, so Undo stays after the last item is dismissed and the list reloads. */}
+      <ActionItemList items={items} limit={limit} recording={recording} empty={scannedAt === null ? "Not scanned yet." : empty} />
+      <p className="scan-row">
+        <button type="button" className="secondary" disabled={scanning || recording.lines.length === 0} onClick={() => void scan()}>
+          {scanning ? "Scanning…" : "Scan for TODOs"}
+        </button>{" "}
+        <span className="muted">
+          {scannedAt === null ? "Claude Sonnet reads the call when you press it." : `Last scanned ${formatClock(scannedAt)}.`}
+        </span>
+      </p>
+      {problem && <p className="message">Couldn't scan: {problem}</p>}
+    </>
   );
 }
 
@@ -207,7 +208,7 @@ export function liveCall(recordings: CallRecording[], now: number): CallRecordin
    */
   const finishing = (recording: CallRecording) =>
     recording.end !== null &&
-    (recording.waitingChunks > 0 || recording.actionItemsBehind) &&
+    recording.waitingChunks > 0 &&
     now - recording.end < CALL_FINISHING_MS;
   return recordings.findLast((recording) => recording.end === null || finishing(recording)) ?? null;
 }

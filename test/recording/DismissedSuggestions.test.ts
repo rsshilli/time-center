@@ -87,9 +87,9 @@ describe("DismissedSuggestions", () => {
           },
         ],
       }));
-      const finder = new ActionItemFinder({ recordings, store: items, haiku: { invoke }, speakers: () => [], now: () => START + 10 * MIN });
+      const finder = new ActionItemFinder({ recordings, store: items, model: { invoke }, speakers: () => [], now: () => START + 10 * MIN });
 
-      const report = await finder.refresh(id);
+      const report = await finder.scan(id);
 
       expect(JSON.stringify(invoke.mock.calls[0][0])).toContain("dismissed these as not action items");
       expect(report.items.map((item) => item.text)).toEqual(["You: book the room"]);
@@ -110,9 +110,9 @@ describe("DismissedSuggestions", () => {
       const invoke = vi.fn(async (_body: object) => ({
         content: [{ type: "tool_use", name: "record_action_items", input: { items: [{ turn: 1, text: "You: book the room" }] } }],
       }));
-      const finder = new ActionItemFinder({ recordings, store: items, haiku: { invoke }, speakers: () => [], now: () => START + 10 * MIN });
+      const finder = new ActionItemFinder({ recordings, store: items, model: { invoke }, speakers: () => [], now: () => START + 10 * MIN });
 
-      const report = await finder.refresh(id);
+      const report = await finder.scan(id);
       expect(invoke).toHaveBeenCalledTimes(1);
       expect(report.items.map((item) => item.text)).toEqual(["You: book the room"]);
       dismissed.restore({ recordingId: id, ...drop });

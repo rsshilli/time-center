@@ -134,7 +134,7 @@ async function main(): Promise<void> {
   const actionItemFinder = new ActionItemFinder({
     recordings,
     store: actionItems,
-    haiku: new BedrockHaiku(),
+    model: sonnet,
     speakers: (id) => callSpeakers(speakerStore, id),
     now: () => Date.now(),
   });
@@ -303,7 +303,7 @@ async function main(): Promise<void> {
       return transcribeSpeech(whisper, model, wav, join(app.getPath("temp"), "time-center-dictation"));
     },
     actionItems,
-    refreshActionItems: (recordingId) => actionItemFinder.refresh(recordingId),
+    scanActionItems: (recordingId) => actionItemFinder.scan(recordingId),
     catchUp: (recordingId, minutes) =>
       catchUp({ recordings, haiku: new BedrockHaiku(), speakers: (id) => callSpeakers(speakerStore, id), now: () => Date.now() }, recordingId, minutes),
     dismissed: new DismissedSuggestions(store.db),

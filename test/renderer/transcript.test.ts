@@ -187,7 +187,7 @@ describe("stateText", () => {
     speakers: [],
     nameChoices: [],
     actionItems: [],
-    actionItemsBehind: false,
+    actionItemsScannedAt: null,
     ...fields,
   });
 

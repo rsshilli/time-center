@@ -219,16 +219,13 @@ export interface CallRecording {
   speakers: CallSpeaker[];
   /** Names to offer when you name a speaker: the meeting's invitees first, then everyone named before. */
   nameChoices: string[];
-  /** Action items Haiku found while you watched the call, newest first; empty if it never looked. */
+  /** Action items found by Scan for TODOs, newest first; empty if it was never scanned. */
   actionItems: ActionItem[];
-  /** Whether Haiku has looked at this call and words came in since, so it still owes a final look. */
-  actionItemsBehind: boolean;
+  /** When the call was last scanned for TODOs; null if never. */
+  actionItemsScannedAt: number | null;
 }
 
-/**
- * How long after a call ends it still counts as live: its last words are being transcribed and Haiku may take
- * a final look. After that, action items are never looked for again.
- */
+/** How long after a call ends it still counts as live, while its last words are being transcribed. */
 export const CALL_FINISHING_MS = 10 * 60_000;
 
 /** Something a call suggests someone should do, as Haiku found it. */
@@ -262,14 +259,12 @@ export interface SuggestionRef {
   text: string;
 }
 
-/** A live call's action items, after Haiku looked again (or chose not to: nothing new was said). */
+/** A call's action items after a scan. */
 export interface ActionItemsReport {
-  /** Newest first. */
+  /** Newest first, less the ones you dismissed. */
   items: ActionItem[];
-  /** When Haiku last read the call; null if it never has. */
-  checkedAt: number | null;
-  /** Why the last look failed, or null. */
-  problem: string | null;
+  /** When the scan ran. */
+  checkedAt: number;
 }
 
 /** The day's recorded calls, and anything stopping transcription. */
@@ -645,7 +640,7 @@ export const IPC = {
   askAboutCalls: "recordings:ask",
   getCallQuestions: "recordings:questions",
   transcribeDictation: "recordings:dictate",
-  refreshActionItems: "recordings:action-items",
+  scanActionItems: "recordings:scan-action-items",
   catchUpOnCall: "recordings:catch-up",
   dismissSuggestion: "recordings:dismiss-suggestion",
   restoreSuggestion: "recordings:restore-suggestion",
@@ -747,11 +742,8 @@ export interface TimeCenterApi {
   getCallQuestions(): Promise<CallQuestion[]>;
   /** Turns dictated speech (a 16 kHz mono 16-bit WAV) into text with whisper, on the Mac. */
   transcribeDictation(wav: ArrayBuffer): Promise<string>;
-  /**
-   * A call's potential action items. Asked only while the Recordings tab shows a live call, so Haiku only
-   * reads a call you're watching; it looks again when there are new words and a minute has passed.
-   */
-  refreshActionItems(recordingId: number): Promise<ActionItemsReport>;
+  /** Scans a call for potential action items with Sonnet, now, keeping the ones found before. */
+  scanActionItems(recordingId: number): Promise<ActionItemsReport>;
   /** Summarises the last 2, 5 or 10 minutes of a call with Haiku, for when you stopped paying attention. */
   catchUpOnCall(recordingId: number, minutes: CatchUpMinutes): Promise<CatchUp>;
   /** Dismisses a suggested TODO on the Recordings tab, so it isn't shown again (nor found again by Haiku). */
