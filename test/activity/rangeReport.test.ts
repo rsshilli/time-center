@@ -87,4 +87,41 @@ describe("buildRangeReport", () => {
     const report = buildRangeReport(activity, STARTER_RULES, monday, monday + 90 * 86_400_000);
     expect(report.days).toHaveLength(32);
   });
+
+  describe("with Personal time and a weekend", () => {
+    const rules = [
+      { field: "app" as const, pattern: "Music", category: "Personal" },
+      { field: "app" as const, pattern: "WebStorm", category: "Coding" },
+    ];
+    /** Saturday 7 and Sunday 8 November 2026 follow the Friday, four days after Monday. */
+    const nextMonday = new Date(2026, 10, 9).getTime();
+
+    beforeEach(() => {
+      activity.insertSegment(segment({ startedAt: nineOn(0), endedAt: nineOn(0) + 60 * MIN, app: "WebStorm" }));
+      activity.insertSegment(segment({ startedAt: nineOn(0) + 60 * MIN, endedAt: nineOn(0) + 90 * MIN, app: "Music" }));
+      activity.insertSegment(segment({ startedAt: nineOn(5), endedAt: nineOn(5) + 45 * MIN, app: "WebStorm" }));
+    });
+
+    it("should never count Personal toward Working, but still list it", () => {
+      const report = buildRangeReport(activity, rules, monday, nextMonday);
+
+      expect(report.activeMs).toBe(105 * MIN);
+      expect(report.byCategory).toEqual([
+        { name: "Coding", ms: 105 * MIN },
+        { name: "Personal", ms: 30 * MIN },
+      ]);
+      expect(report.days).toHaveLength(7);
+    });
+
+    it("should leave out Personal time and Saturdays and Sundays when asked, keeping the stretch's dates", () => {
+      const report = buildRangeReport(activity, rules, monday, nextMonday, () => [], { workOnly: true });
+
+      expect(report.activeMs).toBe(60 * MIN);
+      expect(report.byCategory).toEqual([{ name: "Coding", ms: 60 * MIN }]);
+      expect(report.byApp).toEqual([{ name: "WebStorm", ms: 60 * MIN }]);
+      expect(report.days.map((day) => new Date(day.dayStart).getDate())).toEqual([2, 3, 4, 5, 6]);
+      expect(report.from).toBe(monday);
+      expect(report.to).toBe(nextMonday);
+    });
+  });
 });

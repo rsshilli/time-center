@@ -1,4 +1,4 @@
-import type { CategoryRule, DayReport, TimelineItem, Total } from "../../shared/ipc";
+import { PERSONAL_CATEGORY, type CategoryRule, type DayReport, type ReportOptions, type TimelineItem, type Total } from "../../shared/ipc";
 import type { ActivityStore } from "./ActivityStore";
 import { AWAY, UNTRACKED, categorize } from "./classify";
 import { fillAwayGaps } from "./manualEntries";
@@ -12,6 +12,7 @@ import { splitMeetingTime, type MeetingForDay } from "./meetingTime";
  * @param rules The category rules.
  * @param at Any moment in the day.
  * @param listMeetings Reads the calendar meetings overlapping a window, with their types.
+ * @param options workOnly leaves Personal time out of the totals. Personal never counts toward Working.
  * @returns The day's report.
  */
 export function buildDayReport(
@@ -19,6 +20,7 @@ export function buildDayReport(
   rules: readonly CategoryRule[],
   at: number,
   listMeetings: (from: number, to: number) => readonly MeetingForDay[] = () => [],
+  options: ReportOptions = { workOnly: false },
 ): DayReport {
   const { dayStart, dayEnd } = localDayBounds(at);
   const ruled: TimelineItem[] = store
@@ -40,7 +42,7 @@ export function buildDayReport(
     .listManualEntries(dayStart, dayEnd)
     .map((entry) => ({ ...entry, start: Math.max(entry.start, dayStart), end: Math.min(entry.end, dayEnd) }));
   const { timeline, meetings, allMeetings } = splitMeetingTime(fillAwayGaps(ruled, entries), listMeetings(dayStart, dayEnd));
-  const active = timeline.filter((item) => item.kind === "active");
+  const active = timeline.filter((item) => item.kind === "active" && !(options.workOnly && item.category === PERSONAL_CATEGORY));
   return {
     dayStart,
     dayEnd,
@@ -51,7 +53,7 @@ export function buildDayReport(
       status: shot.status,
       displayId: shot.displayId,
     })),
-    activeMs: sumMs(active),
+    activeMs: sumMs(active.filter((item) => item.category !== PERSONAL_CATEGORY)),
     idleMs: sumMs(timeline.filter((item) => item.kind === "idle")),
     untrackedMs: sumMs(timeline.filter((item) => item.kind === "untracked")),
     byCategory: totalBy(active, (item) => item.category),

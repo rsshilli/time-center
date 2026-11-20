@@ -8,7 +8,17 @@ import {
   type TimelineItem,
   type Total,
 } from "../shared/ipc";
-import { canGoLater, PERIOD_LABELS, periodRange, periodTitle, shiftPeriod, type Period } from "./period";
+import {
+  activePreset,
+  canGoLater,
+  PRESET_LABELS,
+  periodRange,
+  periodTitle,
+  presetView,
+  shiftPeriod,
+  type Period,
+  type Preset,
+} from "./period";
 import { DayHeader } from "./DayHeader";
 import { startOfDay } from "./day";
 import { colourFor, formatClock, formatDuration } from "./format";
@@ -39,13 +49,16 @@ const STRIP_SLOTS = 10;
 /** How far the pointer must move with the button down before a click on the timeline becomes a drag. */
 const DRAG_THRESHOLD_PX = 4;
 
+/** Where the "Ignore weekends and personal time" box is remembered between launches. */
+const WORK_ONLY_KEY = "myTime.workOnly";
+
 /**
- * The My time tab: one day, or a longer stretch (a week, the last 7 days, a month), picked with the toggle
- * at the top.
+ * The My time tab: one day, or a longer stretch (this week so far, last week, last month), picked with the
+ * buttons at the top, with a box to leave weekends and personal time out.
  * @param props.at A moment in the picked day, shared with the Recordings tab.
  * @param props.onChangeDay Called with a moment in the newly picked day.
  * @param props.period How much to show.
- * @param props.onChangePeriod Called with the period picked on the toggle.
+ * @param props.onChangePeriod Called with the period picked.
  */
 export function DashboardScreen({
   at,
@@ -58,9 +71,24 @@ export function DashboardScreen({
   period: Period;
   onChangePeriod: (period: Period) => void;
 }) {
-  const toggle = <PeriodToggle period={period} onChange={onChangePeriod} />;
+  const [workOnly, setWorkOnly] = useState(() => localStorage.getItem(WORK_ONLY_KEY) === "true");
+  const toggle = (
+    <PeriodToggle
+      active={activePreset(period, at, Date.now())}
+      onPick={(preset) => {
+        const view = presetView(preset, at, Date.now());
+        onChangeDay(view.at);
+        onChangePeriod(view.period);
+      }}
+      workOnly={workOnly}
+      onWorkOnly={(checked) => {
+        localStorage.setItem(WORK_ONLY_KEY, String(checked));
+        setWorkOnly(checked);
+      }}
+    />
+  );
   if (period === "day") {
-    return <DayView at={at} onChangeDay={onChangeDay} toggle={toggle} />;
+    return <DayView at={at} onChangeDay={onChangeDay} toggle={toggle} workOnly={workOnly} />;
   }
   return (
     <RangeView
@@ -68,6 +96,7 @@ export function DashboardScreen({
       at={at}
       onChangeDay={onChangeDay}
       toggle={toggle}
+      workOnly={workOnly}
       onOpenDay={(dayStart) => {
         onChangeDay(dayStart);
         onChangePeriod("day");
@@ -77,24 +106,42 @@ export function DashboardScreen({
 }
 
 /**
- * The buttons for how much of your time to show.
- * @param props.period The period showing.
- * @param props.onChange Called with the one picked.
+ * The buttons for how much of your time to show, and the box that leaves weekends and personal time out.
+ * @param props.active The button matching what's showing, if any.
+ * @param props.onPick Called with the button pressed.
+ * @param props.workOnly Whether weekends and personal time are left out.
+ * @param props.onWorkOnly Called when the box is ticked or cleared.
  */
-function PeriodToggle({ period, onChange }: { period: Period; onChange: (period: Period) => void }) {
+function PeriodToggle({
+  active,
+  onPick,
+  workOnly,
+  onWorkOnly,
+}: {
+  active: Preset | null;
+  onPick: (preset: Preset) => void;
+  workOnly: boolean;
+  onWorkOnly: (checked: boolean) => void;
+}) {
   return (
-    <div className="period-toggle" role="group" aria-label="How much to show">
-      {(Object.keys(PERIOD_LABELS) as Period[]).map((option) => (
-        <button
-          key={option}
-          type="button"
-          className={option === period ? "active" : ""}
-          aria-pressed={option === period}
-          onClick={() => onChange(option)}
-        >
-          {PERIOD_LABELS[option]}
-        </button>
-      ))}
+    <div className="period-controls">
+      <div className="period-toggle" role="group" aria-label="How much to show">
+        {(Object.keys(PRESET_LABELS) as Preset[]).map((option) => (
+          <button
+            key={option}
+            type="button"
+            className={option === active ? "active" : ""}
+            aria-pressed={option === active}
+            onClick={() => onPick(option)}
+          >
+            {PRESET_LABELS[option]}
+          </button>
+        ))}
+      </div>
+      <label className="work-only">
+        <input type="checkbox" checked={workOnly} onChange={(event) => onWorkOnly(event.target.checked)} /> Ignore weekends
+        and personal time
+      </label>
     </div>
   );
 }
@@ -106,8 +153,19 @@ function PeriodToggle({ period, onChange }: { period: Period; onChange: (period:
  * @param props.at A moment in the picked day, shared with the Recordings tab.
  * @param props.onChangeDay Called with a moment in the newly picked day.
  * @param props.toggle The period toggle, shown in the header.
+ * @param props.workOnly Whether personal time is left out of the totals.
  */
-function DayView({ at, onChangeDay, toggle }: { at: number; onChangeDay: (at: number) => void; toggle: ReactNode }) {
+function DayView({
+  at,
+  onChangeDay,
+  toggle,
+  workOnly,
+}: {
+  at: number;
+  onChangeDay: (at: number) => void;
+  toggle: ReactNode;
+  workOnly: boolean;
+}) {
   const [report, setReport] = useState<DayReport | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   /** The zoomed-in stretch of the timeline, or null for the whole day. */
@@ -133,7 +191,7 @@ function DayView({ at, onChangeDay, toggle }: { at: number; onChangeDay: (at: nu
   const load = useCallback(async () => {
     const request = ++latestRequest.current;
     try {
-      const day = await window.timeCenter.getDay(at);
+      const day = await window.timeCenter.getDay(at, { workOnly });
       if (request === latestRequest.current) {
         setReport(day);
         setError(null);
@@ -143,7 +201,7 @@ function DayView({ at, onChangeDay, toggle }: { at: number; onChangeDay: (at: nu
         setError(caught instanceof Error ? caught.message : String(caught));
       }
     }
-  }, [at]);
+  }, [at, workOnly]);
 
   useEffect(() => {
     void load();
@@ -306,6 +364,7 @@ function Stat({ label, ms }: { label: string; ms: number }) {
  * @param props.onChangeDay Called with a moment in the stretch moved to.
  * @param props.onOpenDay Called with a day's midnight when its bar is clicked.
  * @param props.toggle The period toggle, shown in the header.
+ * @param props.workOnly Whether weekends and personal time are left out.
  */
 function RangeView({
   period,
@@ -313,12 +372,14 @@ function RangeView({
   onChangeDay,
   onOpenDay,
   toggle,
+  workOnly,
 }: {
   period: Exclude<Period, "day">;
   at: number;
   onChangeDay: (at: number) => void;
   onOpenDay: (dayStart: number) => void;
   toggle: ReactNode;
+  workOnly: boolean;
 }) {
   const [report, setReport] = useState<RangeReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -333,7 +394,7 @@ function RangeView({
     const load = async () => {
       const request = ++latestRequest.current;
       try {
-        const range = await window.timeCenter.getRange(from, to);
+        const range = await window.timeCenter.getRange(from, to, { workOnly });
         if (request === latestRequest.current) {
           setReport(range);
           setError(null);
@@ -350,7 +411,7 @@ function RangeView({
     }
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => clearInterval(timer);
-  }, [from, to, includesToday]);
+  }, [from, to, includesToday, workOnly]);
 
   const isCurrent = !canGoLater(period, at, now);
   const workedDays = report?.days.filter((day) => day.activeMs > 0).length ?? 0;
@@ -380,11 +441,11 @@ function RangeView({
             <Stat label="Away" ms={report.idleMs} />
             <Stat label="Untracked (ignored apps)" ms={report.untrackedMs} />
           </div>
-          {report.activeMs === 0 ? (
+          {report.byCategory.length === 0 ? (
             <p className="lead">Nothing was recorded in this stretch.</p>
           ) : (
             <>
-              <DayBars days={report.days} wide={period === "month"} onOpenDay={onOpenDay} />
+              <DayBars days={report.days} wide={period === "fourWeeks"} onOpenDay={onOpenDay} />
               <div className="totals">
                 <TotalsCard title="Categories" totals={report.byCategory} coloured />
                 <TotalsCard title="Apps" totals={report.byApp} />
@@ -408,7 +469,9 @@ function RangeView({
  * @param props.onOpenDay Called with the clicked day's midnight.
  */
 function DayBars({ days, wide, onOpenDay }: { days: DayTotals[]; wide: boolean; onOpenDay: (dayStart: number) => void }) {
-  const longest = Math.max(...days.map((day) => day.activeMs), 1);
+  // A bar holds every category it shows, Personal included, though Personal doesn't count as working.
+  const shownMs = (day: DayTotals) => day.byCategory.reduce((total, part) => total + part.ms, 0);
+  const longest = Math.max(...days.map(shownMs), 1);
   return (
     <div className="card day-bars" style={{ gridTemplateColumns: `repeat(${days.length}, 1fr)` }}>
       {days.map((day) => {
@@ -424,7 +487,7 @@ function DayBars({ days, wide, onOpenDay }: { days: DayTotals[]; wide: boolean; 
           >
             <span className="day-bar-hours">{day.activeMs > 0 && !wide ? formatDuration(day.activeMs) : ""}</span>
             <span className="day-bar-track">
-              <span className="day-bar-stack" style={{ height: `${(day.activeMs / longest) * 100}%` }}>
+              <span className="day-bar-stack" style={{ height: `${(shownMs(day) / longest) * 100}%` }}>
                 {day.byCategory.map((total) => (
                   <span
                     key={total.name}

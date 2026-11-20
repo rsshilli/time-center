@@ -116,6 +116,15 @@ export const MEETING_TYPE_LABELS: Readonly<Record<MeetingType, string>> = {
 /** The category meeting time goes in while its meeting's type isn't known yet. */
 export const MEETINGS_CATEGORY = "Meetings";
 
+/** The category for your own time. It never counts toward Working. */
+export const PERSONAL_CATEGORY = "Personal";
+
+/** How the My time tab reads your time. */
+export interface ReportOptions {
+  /** Leave Personal time out of every total, and Saturdays and Sundays out of a stretch of days. */
+  workOnly: boolean;
+}
+
 /**
  * Names the category for one type of meeting.
  * @param type The meeting's type, or null while it isn't known.
@@ -681,9 +690,9 @@ export interface TimeCenterApi {
    */
   logProblem(source: string, message: string): Promise<void>;
   /** The timeline, screenshots and totals for the local day that contains this moment. */
-  getDay(at: number): Promise<DayReport>;
+  getDay(at: number, options: ReportOptions): Promise<DayReport>;
   /** The totals for the local days from one midnight up to another, at most MAX_RANGE_DAYS of them. */
-  getRange(from: number, to: number): Promise<RangeReport>;
+  getRange(from: number, to: number, options: ReportOptions): Promise<RangeReport>;
   /** The category rules, in the order they are tried. */
   getRules(): Promise<CategoryRule[]>;
   /** Replaces the category rules. They apply to past days too, since categories are worked out on read. */

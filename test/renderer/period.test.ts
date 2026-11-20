@@ -1,7 +1,9 @@
-import { canGoLater, periodRange, periodTitle, shiftPeriod } from "../../src/renderer/period";
+import { activePreset, canGoLater, periodRange, periodTitle, presetView, shiftPeriod } from "../../src/renderer/period";
 
 /** Local midnight on a day in November 2026 (the 1st was a Sunday). */
 const nov = (day: number) => new Date(2026, 10, day).getTime();
+/** Local midnight on a day in October 2026. */
+const oct = (day: number) => new Date(2026, 9, day).getTime();
 /** Friday 13 November 2026, mid-afternoon. */
 const now = new Date(2026, 10, 13, 15).getTime();
 
@@ -14,37 +16,32 @@ describe("periodRange", () => {
     expect(periodRange("week", nov(8), now)).toEqual({ from: nov(2), to: nov(9) });
   });
 
-  it("should take the last 7 days as the picked day and the six before it", () => {
-    expect(periodRange("last7", now, now)).toEqual({ from: nov(7), to: nov(14) });
-  });
-
-  it("should run this month from the 1st to the end of today, and a past month to its end", () => {
-    expect(periodRange("month", now, now)).toEqual({ from: nov(1), to: nov(14) });
-    expect(periodRange("month", new Date(2026, 9, 20).getTime(), now)).toEqual({ from: new Date(2026, 9, 1).getTime(), to: nov(1) });
+  it("should take 4 weeks as the picked day and the 27 before it, across a month's end", () => {
+    expect(periodRange("fourWeeks", now, now)).toEqual({ from: oct(17), to: nov(14) });
   });
 });
 
 describe("shiftPeriod", () => {
-  it("should step a week or 7 days at a time, and a month to the month before", () => {
-    expect(shiftPeriod("week", now, -1, now)).toBe(nov(6));
-    expect(shiftPeriod("last7", now, -1, now)).toBe(nov(6));
-    expect(shiftPeriod("month", now, -1, now)).toBe(new Date(2026, 9, 1).getTime());
+  it("should step a day, a week or 4 weeks at a time", () => {
     expect(shiftPeriod("day", now, -1, now)).toBe(nov(12));
+    expect(shiftPeriod("week", now, -1, now)).toBe(nov(6));
+    expect(shiftPeriod("fourWeeks", now, -1, now)).toBe(oct(16));
   });
 
   it("should never step past today", () => {
     expect(shiftPeriod("week", nov(10), 1, now)).toBe(nov(13));
-    expect(shiftPeriod("month", new Date(2026, 9, 20).getTime(), 1, now)).toBe(nov(1));
+    expect(shiftPeriod("fourWeeks", nov(1), 1, now)).toBe(nov(13));
   });
 });
 
 describe("canGoLater", () => {
-  it("should only allow moving forward once the next period has started", () => {
+  it("should only allow moving forward when there's something later to show", () => {
     expect(canGoLater("week", now, now)).toBe(false);
     expect(canGoLater("week", nov(5), now)).toBe(true);
-    expect(canGoLater("month", now, now)).toBe(false);
-    expect(canGoLater("last7", now, now)).toBe(false);
-    expect(canGoLater("last7", nov(12), now)).toBe(true);
+    expect(canGoLater("fourWeeks", now, now)).toBe(false);
+    expect(canGoLater("fourWeeks", nov(1), now)).toBe(true);
+    expect(canGoLater("day", now, now)).toBe(false);
+    expect(canGoLater("day", nov(12), now)).toBe(true);
   });
 });
 
@@ -52,13 +49,34 @@ describe("periodTitle", () => {
   it("should name this week, last week and older weeks plainly", () => {
     expect(periodTitle("week", now, now)).toBe("This week so far");
     expect(periodTitle("week", nov(4), now)).toBe("Last week");
-    expect(periodTitle("week", new Date(2026, 9, 28).getTime(), now)).toMatch(/^Week of .*October 26/);
+    expect(periodTitle("week", oct(28), now)).toMatch(/^Week of .*October 26/);
   });
 
-  it("should name the last 7 days and months, saying when they're not over yet", () => {
-    expect(periodTitle("last7", now, now)).toBe("Last 7 days");
-    expect(periodTitle("last7", nov(10), now)).toMatch(/^7 days to .*November 10/);
-    expect(periodTitle("month", now, now)).toBe("November so far");
-    expect(periodTitle("month", new Date(2026, 9, 5).getTime(), now)).toBe("October 2026");
+  it("should name the last 4 weeks, and an earlier 4 weeks by the day it ends", () => {
+    expect(periodTitle("fourWeeks", now, now)).toBe("Last 4 weeks");
+    expect(periodTitle("fourWeeks", oct(16), now)).toMatch(/^4 weeks to .*October 16/);
+  });
+});
+
+describe("presetView", () => {
+  it("should keep the picked day for Day, and jump to this week, last week and the last 4 weeks", () => {
+    expect(presetView("day", nov(4), now)).toEqual({ period: "day", at: nov(4) });
+    expect(presetView("thisWeek", nov(4), now)).toEqual({ period: "week", at: nov(13) });
+    expect(presetView("lastWeek", nov(4), now)).toEqual({ period: "week", at: nov(2) });
+    expect(presetView("last4Weeks", nov(4), now)).toEqual({ period: "fourWeeks", at: nov(13) });
+  });
+});
+
+describe("activePreset", () => {
+  it("should light the button that matches what's showing", () => {
+    expect(activePreset("day", nov(4), now)).toBe("day");
+    expect(activePreset("week", nov(11), now)).toBe("thisWeek");
+    expect(activePreset("week", nov(5), now)).toBe("lastWeek");
+    expect(activePreset("fourWeeks", now, now)).toBe("last4Weeks");
+  });
+
+  it("should light none when the arrows moved somewhere no button names", () => {
+    expect(activePreset("week", oct(28), now)).toBeNull();
+    expect(activePreset("fourWeeks", oct(16), now)).toBeNull();
   });
 });

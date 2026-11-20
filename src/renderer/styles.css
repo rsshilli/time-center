@@ -244,10 +244,23 @@ button:disabled {
   grid-template-columns: repeat(4, 1fr);
 }
 
-/* Day / Week / Last 7 days / Month, at the right of the My time header. */
+/* Day / This week so far / Last week / Last month and the work-only box, at the right of the My time header. */
+.period-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 14px;
+  margin-left: auto;
+}
+
+.work-only {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .period-toggle {
   display: flex;
-  margin-left: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;

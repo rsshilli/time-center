@@ -20,8 +20,10 @@ which Claude reads for action items. A TODO you hand to Claude (a Cowork task or
 - **My time tab.** A timeline of the day, with each stretch of time labelled by app, website or window and
   sorted into categories such as "Code review" or "Email". Click any stretch to see the screenshot taken
   then. To add time the Mac couldn't see, such as a call on your phone or a drive, drag across the timeline.
-  Switch from Day to Week (Monday on, so far), Last 7 days or Month to see the totals added up, with a bar
-  per day split by category; click a bar to open that day.
+  Switch from Day to This week so far, Last week or Last 4 weeks to see the totals added up, with a bar
+  per day split by category; click a bar to open that day, or use ‹ › to step back and forth. Personal time
+  never counts toward Working; tick **Ignore weekends and personal time** to leave it, and Saturdays and
+  Sundays, out of everything.
 - **Joins meetings.** It reads your Google Calendar and opens each meeting 30 seconds before it starts.
   Zoom meetings open in the Zoom app; Google Meet and Teams open in Chrome, where you click Join. If you'd
   rather not have meetings opened for you, set **Settings → Meetings → When a meeting starts** to "Just

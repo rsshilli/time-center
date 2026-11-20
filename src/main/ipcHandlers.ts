@@ -1,5 +1,5 @@
 import { ClipboardItem, clipboard, ipcMain, nativeImage } from "electron";
-import { IPC, MAX_RANGE_DAYS, type BackupSettingsInput, type BackupStatus, type PermissionKind } from "../shared/ipc";
+import { IPC, MAX_RANGE_DAYS, type BackupSettingsInput, type BackupStatus, type PermissionKind, type ReportOptions } from "../shared/ipc";
 import type { ActivityStore } from "./activity/ActivityStore";
 import { type AppLog, assertPageProblem } from "./appLog";
 import { assertRules, parseRules } from "./activity/classify";
@@ -47,15 +47,24 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     const problem = assertPageProblem(source, message);
     deps.log.write(problem.source, problem.message);
   });
-  ipcMain.handle(IPC.getDay, (_event, at: unknown) =>
-    buildDayReport(deps.activity, parseRules(deps.store.getSetting(RULES_SETTING)), assertMoment(at), (from, to) =>
-      deps.calendar.listTypedEvents(from, to),
+  ipcMain.handle(IPC.getDay, (_event, at: unknown, options: unknown) =>
+    buildDayReport(
+      deps.activity,
+      parseRules(deps.store.getSetting(RULES_SETTING)),
+      assertMoment(at),
+      (from, to) => deps.calendar.listTypedEvents(from, to),
+      assertReportOptions(options),
     ),
   );
-  ipcMain.handle(IPC.getRange, (_event, from: unknown, to: unknown) => {
+  ipcMain.handle(IPC.getRange, (_event, from: unknown, to: unknown, options: unknown) => {
     const range = assertRange(from, to);
-    return buildRangeReport(deps.activity, parseRules(deps.store.getSetting(RULES_SETTING)), range.from, range.to, (start, end) =>
-      deps.calendar.listTypedEvents(start, end),
+    return buildRangeReport(
+      deps.activity,
+      parseRules(deps.store.getSetting(RULES_SETTING)),
+      range.from,
+      range.to,
+      (start, end) => deps.calendar.listTypedEvents(start, end),
+      assertReportOptions(options),
     );
   });
   ipcMain.handle(IPC.addManualEntry, (_event, entry: unknown) => {
@@ -108,6 +117,19 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     return buildBackupStatus(deps);
   });
   ipcMain.handle(IPC.restoreLatestBackup, () => restoreLatestBackup(deps));
+}
+
+/**
+ * Checks how the renderer asked for a report to be read.
+ * @param options The value.
+ * @returns It, typed.
+ */
+export function assertReportOptions(options: unknown): ReportOptions {
+  const workOnly = (options as { workOnly?: unknown } | null)?.workOnly;
+  if (typeof workOnly !== "boolean") {
+    throw new Error("Not report options.");
+  }
+  return { workOnly };
 }
 
 /**

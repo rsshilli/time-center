@@ -1,14 +1,63 @@
 import { startOfDay } from "./day";
 
-/** How much of your time the My time tab shows: one day, a Monday-to-Sunday week, the last 7 days, or a month. */
-export type Period = "day" | "week" | "last7" | "month";
+/** How much of your time the My time tab shows: one day, a Monday-to-Sunday week, or 4 weeks up to a day. */
+export type Period = "day" | "week" | "fourWeeks";
 
-/** Each period's button, in the order the toggle shows them. */
-export const PERIOD_LABELS: Record<Period, string> = { day: "Day", week: "Week", last7: "Last 7 days", month: "Month" };
+/** The buttons at the top of the My time tab, each a shortcut to a period. */
+export type Preset = "day" | "thisWeek" | "lastWeek" | "last4Weeks";
+
+/** Each button's label, in the order they're shown. */
+export const PRESET_LABELS: Record<Preset, string> = {
+  day: "Day",
+  thisWeek: "This week so far",
+  lastWeek: "Last week",
+  last4Weeks: "Last 4 weeks",
+};
+
+/** How many days "4 weeks" covers: the picked day and the 27 before it. */
+const FOUR_WEEKS_DAYS = 28;
 
 /**
- * Finds the days a period covers around a moment, stopping at the end of today, so this week and this month
- * come out "so far".
+ * Where a button takes you. Day keeps the day you're on; the others jump to their stretch.
+ * @param preset The button.
+ * @param at A moment in the picked day.
+ * @param now The current time.
+ * @returns The period and a moment in it.
+ */
+export function presetView(preset: Preset, at: number, now: number): { period: Period; at: number } {
+  if (preset === "day") {
+    return { period: "day", at };
+  }
+  if (preset === "thisWeek") {
+    return { period: "week", at: startOfDay(now) };
+  }
+  if (preset === "lastWeek") {
+    return { period: "week", at: addDays(fullRange("week", now).from, -7) };
+  }
+  return { period: "fourWeeks", at: startOfDay(now) };
+}
+
+/**
+ * Which button matches what's showing, so it can be lit.
+ * @param period The period showing.
+ * @param at A moment in the picked day.
+ * @param now The current time.
+ * @returns The button, or null when the arrows have moved somewhere none of them names.
+ */
+export function activePreset(period: Period, at: number, now: number): Preset | null {
+  const shown = fullRange(period, at).from;
+  for (const preset of Object.keys(PRESET_LABELS) as Preset[]) {
+    const view = presetView(preset, at, now);
+    if (view.period === period && fullRange(period, view.at).from === shown) {
+      return preset;
+    }
+  }
+  return null;
+}
+
+/**
+ * Finds the days a period covers around a moment, stopping at the end of today, so this week comes out
+ * "so far".
  * @param period The period.
  * @param at A moment in the picked day.
  * @param now The current time.
@@ -20,7 +69,7 @@ export function periodRange(period: Period, at: number, now: number): { from: nu
 }
 
 /**
- * Moves a period back or forward by its own length: a week, 7 days, or a month. A day moves by a day.
+ * Moves a period back or forward by its own length: a day, a week or 4 weeks.
  * @param period The period.
  * @param at A moment in the picked day.
  * @param direction -1 for earlier, 1 for later.
@@ -28,29 +77,22 @@ export function periodRange(period: Period, at: number, now: number): { from: nu
  * @returns A moment in the period moved to, never after today.
  */
 export function shiftPeriod(period: Period, at: number, direction: -1 | 1, now: number): number {
-  let moved: number;
-  if (period === "month") {
-    const date = new Date(fullRange("month", at).from);
-    date.setMonth(date.getMonth() + direction);
-    moved = date.getTime();
-  } else {
-    moved = addDays(startOfDay(at), (period === "day" ? 1 : 7) * direction);
-  }
-  return Math.min(moved, startOfDay(now));
+  const days = period === "day" ? 1 : period === "week" ? 7 : FOUR_WEEKS_DAYS;
+  return Math.min(addDays(startOfDay(at), days * direction), startOfDay(now));
 }
 
 /**
- * Says whether the period after this one has started yet, for the forward arrow.
+ * Says whether there's a later period to move to, for the forward arrow.
  * @param period The period.
  * @param at A moment in the picked day.
  * @param now The current time.
  * @returns True when there's a later period to move to.
  */
 export function canGoLater(period: Period, at: number, now: number): boolean {
-  if (period === "last7" || period === "day") {
-    return startOfDay(at) < startOfDay(now);
+  if (period === "week") {
+    return fullRange(period, at).to <= startOfDay(now);
   }
-  return fullRange(period, at).to <= startOfDay(now);
+  return startOfDay(at) < startOfDay(now);
 }
 
 /**
@@ -58,10 +100,9 @@ export function canGoLater(period: Period, at: number, now: number): boolean {
  * @param period A period longer than a day.
  * @param at A moment in the picked day.
  * @param now The current time.
- * @returns e.g. "This week so far", "Last week", "Week of Monday, November 2", "Last 7 days", "November so far".
+ * @returns e.g. "This week so far", "Last week", "Week of Monday, November 2", "Last 4 weeks", "4 weeks to …".
  */
 export function periodTitle(period: Exclude<Period, "day">, at: number, now: number): string {
-  const today = startOfDay(now);
   const { from } = fullRange(period, at);
   if (period === "week") {
     const thisWeek = fullRange("week", now).from;
@@ -73,17 +114,10 @@ export function periodTitle(period: Exclude<Period, "day">, at: number, now: num
     }
     return `Week of ${new Date(from).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}`;
   }
-  if (period === "last7") {
-    if (startOfDay(at) === today) {
-      return "Last 7 days";
-    }
-    return `7 days to ${new Date(startOfDay(at)).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}`;
+  if (startOfDay(at) === startOfDay(now)) {
+    return "Last 4 weeks";
   }
-  const month = new Date(from).toLocaleDateString(undefined, { month: "long" });
-  if (from === fullRange("month", now).from) {
-    return `${month} so far`;
-  }
-  return new Date(from).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  return `4 weeks to ${new Date(startOfDay(at)).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}`;
 }
 
 /**
@@ -99,15 +133,8 @@ function fullRange(period: Period, at: number): { from: number; to: number } {
     const from = addDays(day, -((new Date(day).getDay() + 6) % 7));
     return { from, to: addDays(from, 7) };
   }
-  if (period === "last7") {
-    return { from: addDays(day, -6), to: addDays(day, 1) };
-  }
-  if (period === "month") {
-    const first = new Date(day);
-    first.setDate(1);
-    const next = new Date(first);
-    next.setMonth(next.getMonth() + 1);
-    return { from: first.getTime(), to: next.getTime() };
+  if (period === "fourWeeks") {
+    return { from: addDays(day, 1 - FOUR_WEEKS_DAYS), to: addDays(day, 1) };
   }
   return { from: day, to: addDays(day, 1) };
 }

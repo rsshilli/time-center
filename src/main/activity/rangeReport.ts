@@ -1,4 +1,4 @@
-import { MAX_RANGE_DAYS, type CategoryRule, type DayReport, type RangeReport, type Total } from "../../shared/ipc";
+import { MAX_RANGE_DAYS, type CategoryRule, type DayReport, type RangeReport, type ReportOptions, type Total } from "../../shared/ipc";
 import type { ActivityStore } from "./ActivityStore";
 import { buildDayReport, localDayBounds } from "./dayReport";
 import type { MeetingForDay } from "./meetingTime";
@@ -11,6 +11,7 @@ import type { MeetingForDay } from "./meetingTime";
  * @param from Any moment in the first day.
  * @param to The end of the range; a day starting before it is included.
  * @param listMeetings Reads the calendar meetings overlapping a window, with their types.
+ * @param options workOnly leaves Personal time and Saturdays and Sundays out.
  * @returns The range's totals, and each day's for its bar.
  */
 export function buildRangeReport(
@@ -19,17 +20,26 @@ export function buildRangeReport(
   from: number,
   to: number,
   listMeetings: (from: number, to: number) => readonly MeetingForDay[] = () => [],
+  options: ReportOptions = { workOnly: false },
 ): RangeReport {
   // Screenshots aren't shown for a range, so none are read.
   const withoutShots = { ...pick(store), listScreenshots: () => [] };
   const reports: DayReport[] = [];
-  for (let at = localDayBounds(from).dayStart; at < to && reports.length < MAX_RANGE_DAYS; at = localDayBounds(at).dayEnd) {
-    reports.push(buildDayReport(withoutShots, rules, at, listMeetings));
+  let days = 0;
+  const start = localDayBounds(from).dayStart;
+  let end = start;
+  for (let at = start; at < to && days < MAX_RANGE_DAYS; at = localDayBounds(at).dayEnd) {
+    days++;
+    end = localDayBounds(at).dayEnd;
+    if (options.workOnly && isWeekend(at)) {
+      continue;
+    }
+    reports.push(buildDayReport(withoutShots, rules, at, listMeetings, options));
   }
-  const start = reports[0]?.dayStart ?? localDayBounds(from).dayStart;
+  // The stretch asked for, even when its first or last days are weekends left out.
   return {
     from: start,
-    to: reports.at(-1)?.dayEnd ?? start,
+    to: end,
     days: reports.map((report) => ({ dayStart: report.dayStart, activeMs: report.activeMs, byCategory: report.byCategory })),
     activeMs: sum(reports, (report) => report.activeMs),
     idleMs: sum(reports, (report) => report.idleMs),
@@ -44,6 +54,16 @@ export function buildRangeReport(
       ),
     ),
   };
+}
+
+/**
+ * Whether a day is a Saturday or Sunday.
+ * @param dayStart The day's local midnight.
+ * @returns True on a weekend.
+ */
+function isWeekend(dayStart: number): boolean {
+  const weekday = new Date(dayStart).getDay();
+  return weekday === 0 || weekday === 6;
 }
 
 /**
